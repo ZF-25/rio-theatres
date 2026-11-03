@@ -8,6 +8,10 @@ This folder contains the version-controlled PostgreSQL database schema and migra
 database/
 ├── migrations/
 │   └── 001_initial_schema.sql
+├── seeds/
+│   ├── 001_theaters_rooms_seats.sql
+│   ├── 002_movies.sql
+│   └── 003_screenings.sql
 └── README.md
 ```
 
@@ -25,6 +29,34 @@ database/
 5. Verify that the tables and enum types have been created.
 
 The migration is wrapped in a transaction. If a statement fails, PostgreSQL will not commit a partially created schema.
+
+
+## Apply seed data
+
+After applying the initial migration, run the seed files in the following order:
+
+1. `seeds/001_theaters_rooms_seats.sql` — creates the Rio theaters in Oulu and Tampere, their rooms, and seats.
+2. `seeds/002_movies.sql` — inserts the initial movie catalogue.
+3. `seeds/003_screenings.sql` — inserts sample screenings for both theater locations.
+
+The seed files should be executed only after the initial schema migration has been applied.
+
+The screening start time represents the beginning of the advertising period:
+- Advertising duration: 12 minutes.
+- Movie start time: screening start time + 12 minutes.
+- Screening end time: screening start time + advertising duration + movie duration.
+
+The sample schedule includes selected first screenings with a 50% higher ticket price.
+
+## Database constraints and booking considerations
+
+The initial schema includes database-level protections for important scheduling and booking rules:
+
+- The `screenings` table has an exclusion constraint that prevents overlapping screenings in the same room.
+- The `booking_seats` table has a unique constraint on `(screening_id, seat_id)` to prevent the same seat from being assigned to multiple bookings for one screening.
+- The `seat_holds` table has a partial unique index that allows only one active hold for a seat in a particular screening.
+
+The backend must still manage hold expiration, booking transactions, authorization, and payment processing. Expired holds must be marked as expired before a new active hold is created.
 
 ## Important notes
 
@@ -46,4 +78,3 @@ Role-specific permissions (customer, cashier, admin), cashier assignment validat
 - The `seat_holds` table permits only one row with `hold_status = 'active'` for a particular screening and seat. The backend must mark expired holds as `expired` before a new active hold is created.
 - `bookings.created_by` records the staff account that created a booking (for example, a cashier sale). It can be NULL for a customer-created booking.
 - The `cashier_theaters` foreign keys establish assignments, but the application must verify that the assigned user has the `cashier` role.
-- This first migration does not yet enforce non-overlapping screening time ranges or prevent the same seat from being sold in two different bookings for the same screening. Those rules require additional database logic and transactional booking implementation; they must be completed before production use.
