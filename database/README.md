@@ -78,3 +78,19 @@ Role-specific permissions (customer, cashier, admin), cashier assignment validat
 - The `seat_holds` table permits only one row with `hold_status = 'active'` for a particular screening and seat. The backend must mark expired holds as `expired` before a new active hold is created.
 - `bookings.created_by` records the staff account that created a booking (for example, a cashier sale). It can be NULL for a customer-created booking.
 - The `cashier_theaters` foreign keys establish assignments, but the application must verify that the assigned user has the `cashier` role.
+## Migration verification
+
+The initial database migration (`001_initial_schema.sql`) was
+successfully tested on a separate empty PostgreSQL database.
+
+Verification results:
+- 12 tables created successfully.
+- 17 foreign key constraints created.
+- 37 indexes created.
+- Primary key, unique, and check constraints verified.
+- The screening overlap exclusion constraint was verified.
+- The unique constraint preventing duplicate seat sales
+  for the same screening was verified.
+
+The migration test was performed separately from the main
+project database.
