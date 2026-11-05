@@ -1,19 +1,21 @@
+import { Route, Routes } from 'react-router-dom'
+
+import CustomerLayout from './layouts/CustomerLayout.jsx'
+import Home from './pages/Home.jsx'
+import Setup from './pages/Setup.jsx'
+import NotFound from './pages/NotFound.jsx'
+
 import './App.css'
 
 function App() {
   return (
-    <div className="app">
-      <header className="header">
-        <h1>Rio Theaters</h1>
-        <p>Hello World!</p>
-        <p>React frontend is running successfully.</p>
-      </header>
-
-      <main className="main">
-        <h2>Local Development Environment</h2>
-        <p>Frontend: React + Vite</p>
-      </main>
-    </div>
+    <Routes>
+      <Route element={<CustomerLayout />}>
+        <Route index element={<Home />} />
+        <Route path="setup" element={<Setup />} />
+        <Route path="*" element={<NotFound />} />
+      </Route>
+    </Routes>
   )
 }
 
