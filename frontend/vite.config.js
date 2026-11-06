@@ -6,10 +6,17 @@ export default defineConfig({
 
   server: {
     proxy: {
+      // Forward requests beginning with /api to Express.
+      //
+      // Example:
+      // Frontend: /api/health
+      // Backend:  http://localhost:5000/api/health
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/api/, ''),
+
+        // Do not remove /api.
+        // Ruvindra's backend routes now include this prefix.
       },
     },
   },
