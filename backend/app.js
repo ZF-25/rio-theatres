@@ -25,6 +25,11 @@ app.get('/api/db-check', async (req, res, next) => {
   }
 });
 
+// Customer API routes
+app.use('/api/theaters', require('./src/routes/theaters'));
+app.use('/api/movies', require('./src/routes/movies'));
+app.use('/api/screenings', require('./src/routes/screenings'));
+
 // Unknown routes
 app.use((req, res) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });
@@ -32,10 +37,16 @@ app.use((req, res) => {
 
 // Error handler
 app.use((err, req, res, next) => {
+  const status = err.status || 500;
+
+  // Our own errors (400, 404, 409...) are safe to show to the client.
+  if (status < 500) {
+    return res.status(status).json({ error: { code: err.code, message: err.message } });
+  }
+
+  // Unexpected errors: log details on the server, hide them from the client.
   console.error(err);
-  res.status(err.status || 500).json({
-    error: { code: err.code || 'SERVER_ERROR', message: err.message || 'Server error' },
-  });
+  res.status(500).json({ error: { code: 'SERVER_ERROR', message: 'Server error' } });
 });
 
 module.exports = app;
