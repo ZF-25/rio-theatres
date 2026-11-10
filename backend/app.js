@@ -35,7 +35,10 @@ app.use('/api/movies', require('./src/routes/movies'));
 app.use('/api/screenings', require('./src/routes/screenings'));
 // Authentication routes
 app.use('/api/auth', require('./src/routes/auth'));
-
+app.use(
+  '/api/v1/owner/cashiers',
+  require('./src/routes/ownerCashiers')
+);
 // Unknown routes
 app.use((req, res) => {
   res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Route not found' } });

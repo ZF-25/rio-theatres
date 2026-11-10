@@ -2,6 +2,7 @@
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const pool = require('../config/db');
+const { mapDatabaseRoleToApiRole } = require('../utils/roleMapper');
 
 const SESSION_DURATION = 7 * 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_NAME = 'rio_session';
@@ -122,10 +123,10 @@ const login = async (req, res) => {
 
     // Find user
     const result = await pool.query(
-      `SELECT user_id, first_name, last_name,
-              email, password_hash, role
-       FROM users
-       WHERE email = $1`,
+    `SELECT user_id, first_name, last_name,
+        email, password_hash, role, active
+ FROM users
+ WHERE email = $1`,
       [normalizedEmail]
     );
 
@@ -148,6 +149,11 @@ const login = async (req, res) => {
         error: 'Invalid email or password'
       });
     }
+    if (!user.active) {
+  return res.status(401).json({
+    error: 'Invalid email or password'
+  });
+}
 
     // Generate a random session token
     const sessionToken = crypto.randomBytes(32).toString('hex');
@@ -183,7 +189,7 @@ const login = async (req, res) => {
         first_name: user.first_name,
         last_name: user.last_name,
         email: user.email,
-        role: user.role
+        role: mapDatabaseRoleToApiRole(user.role)
       }
     });
 
@@ -198,11 +204,18 @@ const login = async (req, res) => {
 
 // GET CURRENT USER
 const getCurrentUser = (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
   res.status(200).json({
-    user: req.user
+    user: {
+      user_id: req.user.user_id,
+      first_name: req.user.first_name,
+      last_name: req.user.last_name,
+      email: req.user.email,
+      role: mapDatabaseRoleToApiRole(req.user.role)
+    }
   });
 };
-
 // LOGOUT
 const logout = async (req, res) => {
   try {

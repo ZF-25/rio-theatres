@@ -6,7 +6,7 @@ const SESSION_COOKIE_NAME = 'rio_session';
 const authenticateUser = async (req, res, next) => {
   try {
     //  получает токен сессии через cookie
-    const sessionToken = req.cookies[SESSION_COOKIE_NAME];
+    const sessionToken = req.cookies?.[SESSION_COOKIE_NAME];
 
     if (!sessionToken) {
       return res.status(401).json({
@@ -22,16 +22,18 @@ const authenticateUser = async (req, res, next) => {
 
     // находит валидную сессию и юзера этой сессии
     const result = await pool.query(
-      `SELECT
-          u.user_id,
-          u.first_name,
-          u.last_name,
-          u.email,
-          u.role
-       FROM sessions s
-       JOIN users u ON u.user_id = s.user_id
-       WHERE s.token_hash = $1
-         AND s.expires_at > NOW()`,
+     `SELECT
+    u.user_id,
+    u.first_name,
+    u.last_name,
+    u.email,
+    u.role,
+    u.active
+ FROM sessions s
+ JOIN users u ON u.user_id = s.user_id
+ WHERE s.token_hash = $1
+   AND s.expires_at > NOW()
+   AND u.active = TRUE`,
 //  Мы объединяем две таблицы:
 // - sessions — проверяем существование и срок действия сессии.
 // - users — получаем информацию о пользователе и его роли.
