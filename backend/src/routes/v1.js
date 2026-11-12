@@ -8,5 +8,6 @@ router.use('/cinemas', require('./cinemas'));
 router.get('/genres', listGenres);
 router.use('/movies', require('./movies'));
 router.use('/screenings', require('./screenings'));
+router.use('/holds', require('./holds'));
 
 module.exports = router;
