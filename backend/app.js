@@ -1,26 +1,28 @@
+
 const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const pool = require('./src/config/db');
 const cookieParser = require('cookie-parser');
+
 const app = express();
 
-// Behind Render/Rahti HTTPS termination, so Secure cookies work (contract 13).
+// Trust the HTTPS proxy used by Render/Rahti.
 app.set('trust proxy', 1);
 
-// Request/correlation ID for server logs (contract 10). Never contains secrets.
+// Request ID for logging and debugging.
 app.use((req, res, next) => {
   req.id = crypto.randomUUID();
   res.set('X-Request-Id', req.id);
   next();
 });
 
-// Credentialed CORS for the exact frontend origin(s), never a wildcard (contract 13).
-// FRONTEND_URL may list several origins separated by commas.
+// Allow credentialed requests from configured frontend origins.
 const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
   .split(',')
   .map((origin) => origin.trim())
   .filter(Boolean);
+
 app.use(
   cors({
     origin: allowedOrigins,
@@ -30,32 +32,29 @@ app.use(
   })
 );
 
-// Stripe webhook: must get the RAW request body to verify Stripe's
-// signature, so it is registered BEFORE express.json().
+// Stripe webhook MUST receive the raw body before express.json().
 app.post(
   '/api/stripe/webhook',
   express.raw({ type: 'application/json', limit: '256kb' }),
   require('./src/controllers/stripeWebhookController').stripeWebhook
 );
 
-// Read JSON request bodies, maximum 64 KiB (contract 2).
+// Parse JSON request bodies (maximum 64 KB).
 app.use(express.json({ limit: '64kb' }));
 
-//Это позволит Express читать cookie, в частности нашу rio_session
+// Parse session cookies.
 app.use(cookieParser());
 
-// Liveness check outside /api/v1 (contract 13): 200 {"status":"ok"}, no secrets.
+// Health checks.
 app.get('/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Old health check, kept until the frontend switches to API mode.
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-
-// Database check
+// Database connection check.
 app.get('/api/db-check', async (req, res, next) => {
   try {
     const result = await pool.query('SELECT NOW()');
@@ -65,45 +64,102 @@ app.get('/api/db-check', async (req, res, next) => {
   }
 });
 
-// Customer API (contract: everything under /api/v1)
+// Main versioned API (catalogue, screenings, holds, etc.).
 app.use('/api/v1', require('./src/routes/v1'));
-// Authentication routes
+
+// Authentication API.
+app.use('/api/v1/auth', require('./src/routes/auth'));
+
+// Temporary compatibility with the old frontend.
 app.use('/api/auth', require('./src/routes/auth'));
+
+// Owner API: cashier management.
 app.use(
   '/api/v1/owner/cashiers',
   require('./src/routes/ownerCashiers')
 );
-// Unknown routes
+
+// Cashier API.
+app.use(
+  '/api/v1/cashier',
+  require('./src/routes/cashier')
+);
+
+// Handle unknown routes.
 app.use((req, res) => {
+  res.set('Cache-Control', 'no-store');
+
   res.status(404).json({
-    error: { code: 'NOT_FOUND', message: 'Route not found', fieldErrors: {}, details: {} },
+    error: {
+      code: 'NOT_FOUND',
+      message: 'Route not found',
+      fieldErrors: {},
+      details: {},
+    },
   });
 });
 
-// Error handler - one error shape for every endpoint (contract 3 + 10):
-// { error: { code, message, fieldErrors, details } }
+// Global error handler.
 app.use((err, req, res, next) => {
-  const send = (status, code, message, fieldErrors = {}, details = {}) =>
-    res.status(status).json({ error: { code, message, fieldErrors, details } });
+  if (res.headersSent) {
+    return next(err);
+  }
 
-  // Malformed JSON request body
+  res.set('Cache-Control', 'no-store');
+
+  const sendError = (status, code, message, fieldErrors = {}, details = {}) => {
+    return res.status(status).json({
+      error: {
+        code,
+        message,
+        fieldErrors,
+        details,
+      },
+    });
+  };
+
+  // Malformed JSON.
   if (err.type === 'entity.parse.failed') {
-    return send(400, 'BAD_REQUEST', 'The request body is not valid JSON.');
+    return sendError(
+      400,
+      'INVALID_JSON',
+      'Request body contains invalid JSON'
+    );
   }
 
-  // Body larger than 64 KiB
+  // Request body exceeds the allowed limit.
   if (err.type === 'entity.too.large') {
-    return send(413, 'PAYLOAD_TOO_LARGE', 'The request body is too large.');
+    return sendError(
+      413,
+      'PAYLOAD_TOO_LARGE',
+      'Request body is too large'
+    );
   }
 
-  // Our own errors (404, 409, 422, 502 payment provider...) are safe to show.
-  if (err.status && (err.status < 500 || err.expose === true)) {
-    return send(err.status, err.code, err.message, err.fieldErrors, err.details);
+  // Expected client errors and explicitly exposed errors.
+  const status = Number.isInteger(err.status) ? err.status : 500;
+
+  if (
+    (status >= 400 && status < 500) ||
+    (status >= 500 && err.expose === true)
+  ) {
+    return sendError(
+      status,
+      err.code || 'REQUEST_ERROR',
+      err.message || 'Request could not be processed',
+      err.fieldErrors || {},
+      err.details || {}
+    );
   }
 
-  // Unexpected errors: log with the request ID, never expose SQL or stack traces.
+  // Unexpected server errors.
   console.error(`[request ${req.id}]`, err);
-  return send(500, 'INTERNAL_SERVER_ERROR', 'Something went wrong.');
+
+  return sendError(
+    500,
+    'INTERNAL_SERVER_ERROR',
+    'Something went wrong'
+  );
 });
 
 module.exports = app;

@@ -10,7 +10,10 @@ const authenticateUser = async (req, res, next) => {
 
     if (!sessionToken) {
       return res.status(401).json({
-        error: 'Authentication required'
+        error: {
+          code: 'AUTH_REQUIRED',
+          message: 'Authentication required'
+        }
       });
     }
 
@@ -22,29 +25,38 @@ const authenticateUser = async (req, res, next) => {
 
     // находит валидную сессию и юзера этой сессии
     const result = await pool.query(
-     `SELECT
-    u.user_id,
-    u.first_name,
-    u.last_name,
-    u.email,
-    u.role,
-    u.active
- FROM sessions s
- JOIN users u ON u.user_id = s.user_id
- WHERE s.token_hash = $1
-   AND s.expires_at > NOW()
-   AND u.active = TRUE`,
-//  Мы объединяем две таблицы:
-// - sessions — проверяем существование и срок действия сессии.
-// - users — получаем информацию о пользователе и его роли.
+      `UPDATE sessions s
+       SET last_activity_at = NOW(),
+           expires_at = NOW() + INTERVAL '24 hours'
+       FROM users u
+       WHERE s.token_hash = $1
+         AND s.user_id = u.user_id
+         AND s.expires_at > NOW()
+         AND s.last_activity_at > NOW() - INTERVAL '24 hours'
+         AND u.active = TRUE
+       RETURNING
+         u.user_id,
+         u.first_name,
+         u.last_name,
+         u.email,
+         u.role,
+         u.active`,
       [tokenHash]
     );
 
+//  Мы объединяем две таблицы:
+// - sessions — проверяем существование и срок действия сессии.
+// - users — получаем информацию о пользователе и его роли.
+
     if (result.rows.length === 0) {
       return res.status(401).json({
-        error: 'Invalid or expired session'
+        error: {
+          code: 'INVALID_SESSION',
+          message: 'Invalid or expired session'
+        }
       });
     }
+
     // сохраняет найденного пользователя внутри текущего запроса. Другие маршруты смогут 
     // использовать req.user.role, req.user.email и другие поля.
     req.user = result.rows[0];
@@ -56,7 +68,10 @@ const authenticateUser = async (req, res, next) => {
     console.error('Authentication error:', error.message);
 
     return res.status(500).json({
-      error: 'Internal server error'
+      error: {
+        code: 'SERVER_ERROR',
+        message: 'Server error'
+      }
     });
   }
 };
