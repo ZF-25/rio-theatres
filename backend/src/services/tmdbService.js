@@ -5,13 +5,20 @@ const TMDB_BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE_URL = 'https://image.tmdb.org/t/p/w500';
 const TIMEOUT_MS = 8000;
 
+// Backend-only credential (contract: TMDB_READ_ACCESS_TOKEN).
+// TMDB_API_KEY is still accepted so existing .env files keep working.
+function getTmdbCredential() {
+  return process.env.TMDB_READ_ACCESS_TOKEN || process.env.TMDB_API_KEY;
+}
+
 async function tmdbGet(path, params = {}) {
-  const key = process.env.TMDB_API_KEY;
+  const key = getTmdbCredential();
   if (!key) {
-    throw new Error('TMDB_API_KEY is not set');
+    throw new Error('TMDB_READ_ACCESS_TOKEN is not set');
   }
 
   const url = new URL(TMDB_BASE_URL + path);
+  url.searchParams.set('language', 'en-US');
   for (const [name, value] of Object.entries(params)) {
     url.searchParams.set(name, value);
   }
@@ -26,27 +33,35 @@ async function tmdbGet(path, params = {}) {
   }
 
   const response = await fetch(url, { headers, signal: AbortSignal.timeout(TIMEOUT_MS) });
+  if (response.status === 429) {
+    // Rate limited: stop this sync run and respect Retry-After.
+    const err = new Error(`TMDB rate limit reached; retry after ${response.headers.get('retry-after') || '?'} s`);
+    err.rateLimited = true;
+    throw err;
+  }
   if (!response.ok) {
     throw new Error(`TMDB request failed: ${response.status} ${response.statusText}`);
   }
   return response.json();
 }
 
-// Finds the best TMDB match for a title. Returns the TMDB id or null.
-async function searchMovieId(title) {
+// Lists TMDB candidates for a title, so a person can pick the right ID.
+async function searchMovies(title) {
   const data = await tmdbGet('/search/movie', { query: title });
-  return data.results && data.results.length > 0 ? data.results[0].id : null;
+  return (data.results || []).slice(0, 8).map((m) => ({
+    tmdbId: m.id,
+    title: m.title,
+    releaseDate: m.release_date || null,
+  }));
 }
 
-// Finnish age rating if available, otherwise the US one.
+// Finnish age rating only (contract section 11): another country's
+// certification is never used as a Finnish rating.
 function pickAgeRating(releaseDates) {
   const countries = (releaseDates && releaseDates.results) || [];
-  for (const country of ['FI', 'US']) {
-    const entry = countries.find((c) => c.iso_3166_1 === country);
-    const rated = entry && entry.release_dates.find((d) => d.certification);
-    if (rated) return rated.certification;
-  }
-  return null;
+  const fi = countries.find((c) => c.iso_3166_1 === 'FI');
+  const rated = fi && fi.release_dates.find((d) => d.certification);
+  return rated ? rated.certification : null;
 }
 
 // First YouTube trailer, if there is one.
@@ -66,12 +81,14 @@ async function getMovieDetails(tmdbId) {
 
   return {
     tmdbId: data.id,
+    title: data.title,
     description: data.overview || null,
-    durationMinutes: data.runtime || null,
+    // Only a positive whole-minute runtime is valid for scheduling.
+    durationMinutes: Number.isInteger(data.runtime) && data.runtime > 0 ? data.runtime : null,
     posterUrl: data.poster_path ? IMAGE_BASE_URL + data.poster_path : null,
     trailerUrl: pickTrailerUrl(data.videos),
     ageRating: pickAgeRating(data.release_dates),
   };
 }
 
-module.exports = { searchMovieId, getMovieDetails, pickAgeRating, pickTrailerUrl };
+module.exports = { searchMovies, getMovieDetails, pickAgeRating, pickTrailerUrl, getTmdbCredential };

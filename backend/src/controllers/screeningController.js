@@ -1,22 +1,52 @@
 const screeningService = require('../services/screeningService');
-const httpError = require('../utils/httpError');
-const { toId, toDate } = require('../utils/validate');
+const seatService = require('../services/seatService');
+const movieService = require('../services/movieService');
+const cinemaService = require('../services/cinemaService');
+const { notFound, validationError } = require('../utils/httpError');
+const { pathId, filterId, calendarDate, pagination } = require('../utils/validate');
+const { sendData, sendList, noStore } = require('../utils/respond');
 
+// GET /screenings?movieId=&cinemaId=&roomId=&date=&page=&pageSize=
 async function listScreenings(req, res) {
-  const { theaterId, movieId, date } = req.query;
-  res.json(
-    await screeningService.getScreenings({
-      theaterId: theaterId ? toId(theaterId, 'theaterId') : undefined,
-      movieId: movieId ? toId(movieId, 'movieId') : undefined,
-      date: date ? toDate(date, 'date') : undefined,
-    })
-  );
+  const movieId = filterId(req.query.movieId, 'movieId');
+  const cinemaId = filterId(req.query.cinemaId, 'cinemaId');
+  const roomId = filterId(req.query.roomId, 'roomId');
+  const date = calendarDate(req.query.date);
+  const page = pagination(req.query);
+
+  if (movieId && !(await movieService.movieExists(movieId))) {
+    throw validationError('movieId', 'Unknown movie.');
+  }
+  if (cinemaId && !(await cinemaService.cinemaExists(cinemaId))) {
+    throw validationError('cinemaId', 'Unknown cinema.');
+  }
+  if (roomId && !(await cinemaService.roomExists(roomId))) {
+    throw validationError('roomId', 'Unknown room.');
+  }
+
+  const { items, totalItems } = await screeningService.listScreenings({
+    movieId, cinemaId, roomId, date, ...page,
+  });
+  noStore(res); // contains seat availability
+  sendList(res, items, { ...page, totalItems });
 }
 
 async function getScreening(req, res) {
-  const screening = await screeningService.getScreeningById(toId(req.params.id, 'id'));
-  if (!screening) throw httpError(404, 'SCREENING_NOT_FOUND', 'Screening not found');
-  res.json(screening);
+  const screening = await screeningService.getScreening(
+    pathId(req.params.screeningId, 'Screening not found')
+  );
+  if (!screening) throw notFound('Screening not found');
+  noStore(res);
+  sendData(res, screening);
 }
 
-module.exports = { listScreenings, getScreening };
+async function getSeatMap(req, res) {
+  const seatMap = await seatService.getSeatMap(
+    pathId(req.params.screeningId, 'Screening not found')
+  );
+  if (!seatMap) throw notFound('Screening not found');
+  noStore(res);
+  sendData(res, seatMap);
+}
+
+module.exports = { listScreenings, getScreening, getSeatMap };

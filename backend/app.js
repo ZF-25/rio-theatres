@@ -1,4 +1,5 @@
 
+const crypto = require('crypto');
 const express = require('express');
 const cors = require('cors');
 const pool = require('./src/config/db');
@@ -6,24 +7,47 @@ const cookieParser = require('cookie-parser');
 
 const app = express();
 
-// Allow the React frontend to send and receive session cookies.
-app.use(cors({
-  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
-  credentials: true
-}));
+// Trust the HTTPS proxy used by Render/Rahti.
+app.set('trust proxy', 1);
 
-// Parse JSON request bodies.
-app.use(express.json());
+// Request ID for logging and debugging.
+app.use((req, res, next) => {
+  req.id = crypto.randomUUID();
+  res.set('X-Request-Id', req.id);
+  next();
+});
 
-// Parse cookies, including rio_session.
+// Allow credentialed requests from configured frontend origins.
+const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: allowedOrigins,
+    credentials: true,
+    methods: ['GET', 'POST', 'PATCH', 'PUT', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'X-CSRF-Token', 'Idempotency-Key'],
+  })
+);
+
+// Parse JSON request bodies (maximum 64 KB).
+app.use(express.json({ limit: '64kb' }));
+
+// Parse session cookies.
 app.use(cookieParser());
 
-// Health check.
+// Health checks.
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok' });
+});
+
 app.get('/api/health', (req, res) => {
   res.json({ status: 'ok' });
 });
 
-// Database check.
+// Database connection check.
 app.get('/api/db-check', async (req, res, next) => {
   try {
     const result = await pool.query('SELECT NOW()');
@@ -33,18 +57,17 @@ app.get('/api/db-check', async (req, res, next) => {
   }
 });
 
-// Customer API routes.
-app.use('/api/theaters', require('./src/routes/theaters'));
-app.use('/api/movies', require('./src/routes/movies'));
-app.use('/api/screenings', require('./src/routes/screenings'));
+// Main versioned API (catalogue and other public endpoints).
+app.use('/api/v1', require('./src/routes/v1'));
 
-// Authentication API v1.
+// Authentication API.
 app.use('/api/v1/auth', require('./src/routes/auth'));
 
-// Temporary compatibility with old frontend routes.
+// Temporary compatibility with the old frontend.
 app.use('/api/auth', require('./src/routes/auth'));
 
-// Owner API.
+
+// Owner API: cashier management.
 app.use(
   '/api/v1/owner/cashiers',
   require('./src/routes/ownerCashiers')
@@ -63,8 +86,10 @@ app.use((req, res) => {
   res.status(404).json({
     error: {
       code: 'NOT_FOUND',
-      message: 'Route not found'
-    }
+      message: 'Route not found',
+      fieldErrors: {},
+      details: {},
+    },
   });
 });
 
@@ -76,54 +101,59 @@ app.use((err, req, res, next) => {
 
   res.set('Cache-Control', 'no-store');
 
-  // Handle malformed JSON.
+  const sendError = (status, code, message, fieldErrors = {}, details = {}) => {
+    return res.status(status).json({
+      error: {
+        code,
+        message,
+        fieldErrors,
+        details,
+      },
+    });
+  };
+
+  // Malformed JSON.
   if (err.type === 'entity.parse.failed') {
-    return res.status(400).json({
-      error: {
-        code: 'INVALID_JSON',
-        message: 'Request body contains invalid JSON'
-      }
-    });
+    return sendError(
+      400,
+      'INVALID_JSON',
+      'Request body contains invalid JSON'
+    );
   }
 
-  // Handle request body that exceeds the configured size limit.
+  // Request body exceeds 64 KB.
   if (err.type === 'entity.too.large') {
-    return res.status(413).json({
-      error: {
-        code: 'PAYLOAD_TOO_LARGE',
-        message: 'Request body is too large'
-      }
-    });
+    return sendError(
+      413,
+      'PAYLOAD_TOO_LARGE',
+      'Request body is too large'
+    );
   }
 
-  const status = Number.isInteger(err.status) &&
-    err.status >= 400 &&
-    err.status < 500
+  const status =
+    Number.isInteger(err.status) && err.status >= 400 && err.status < 500
       ? err.status
       : 500;
 
   // Expected client errors.
   if (status < 500) {
-    return res.status(status).json({
-      error: {
-        code: err.code || 'REQUEST_ERROR',
-        message: err.message || 'Request could not be processed',
-        ...(err.fieldErrors && {
-          fieldErrors: err.fieldErrors
-        })
-      }
-    });
+    return sendError(
+      status,
+      err.code || 'REQUEST_ERROR',
+      err.message || 'Request could not be processed',
+      err.fieldErrors || {},
+      err.details || {}
+    );
   }
 
   // Unexpected server errors.
-  console.error('Unhandled API error:', err);
+  console.error(`[request ${req.id}]`, err);
 
-  return res.status(500).json({
-    error: {
-      code: 'SERVER_ERROR',
-      message: 'Server error'
-    }
-  });
+  return sendError(
+    500,
+    'INTERNAL_SERVER_ERROR',
+    'Something went wrong'
+  );
 });
 
 module.exports = app;

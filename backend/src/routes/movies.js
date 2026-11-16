@@ -4,6 +4,6 @@ const { listMovies, getMovie } = require('../controllers/movieController');
 const router = express.Router();
 
 router.get('/', listMovies);
-router.get('/:id', getMovie);
+router.get('/:movieId', getMovie);
 
 module.exports = router;

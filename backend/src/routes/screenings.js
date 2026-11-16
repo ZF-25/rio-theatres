@@ -1,9 +1,10 @@
 const express = require('express');
-const { listScreenings, getScreening } = require('../controllers/screeningController');
+const { listScreenings, getScreening, getSeatMap } = require('../controllers/screeningController');
 
 const router = express.Router();
 
 router.get('/', listScreenings);
-router.get('/:id', getScreening);
+router.get('/:screeningId', getScreening);
+router.get('/:screeningId/seats', getSeatMap);
 
 module.exports = router;
