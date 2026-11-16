@@ -6,21 +6,29 @@ const {
   register,
   login,
   getCurrentUser,
+  getSession,
   logout
 } = require('../controllers/authController');
 
 const { authenticateUser } = require('../middleware/authMiddleware');
+const { verifyCsrfToken } = require('../middleware/csrfMiddleware');
 
-// Registration
-router.post('/register', register);
+const {
+  loginRateLimiter,
+  registerRateLimiter
+} = require('../middleware/rateLimitMiddleware');
 
-// Login
-router.post('/login', login);
-
-// Get current authenticated user
-router.get('/me', authenticateUser, getCurrentUser);
+// Registration and login with CSRF protection and rate limiting.
+router.post('/register', registerRateLimiter, verifyCsrfToken, register);
+router.post('/login', loginRateLimiter, verifyCsrfToken, login);
 
 // Logout
-router.post('/logout', logout);
+router.post('/logout', verifyCsrfToken, logout);
+
+// Get or create the current session (guest or authenticated).
+router.get('/session', getSession);
+
+// Get current authenticated user.
+router.get('/me', authenticateUser, getCurrentUser);
 
 module.exports = router;

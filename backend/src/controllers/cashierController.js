@@ -1,8 +1,11 @@
 
 const pool = require('../config/db');
 const bcrypt = require('bcrypt');
+
 // GET: Retrieve all cashier accounts
 const getCashiers = async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
   try {
     const {
       search = '',
@@ -27,6 +30,17 @@ const getCashiers = async (req, res) => {
           code: 'VALIDATION_ERROR',
           message: 'Invalid pagination parameters',
           fieldErrors: {},
+          details: {}
+        }
+      });
+    }
+
+    if (typeof search !== 'string') {
+      return res.status(422).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid search parameter',
+          fieldErrors: { search: 'Search must be a string' },
           details: {}
         }
       });
@@ -95,17 +109,15 @@ const getCashiers = async (req, res) => {
       [...values, limit, offset]
     );
 
-  const cashiers = cashierResult.rows.map((cashier) => ({
-  id: String(cashier.user_id),
-  firstName: cashier.first_name,
-  lastName: cashier.last_name,
-  email: cashier.email,
-  role: cashier.role,
-  active: cashier.active,
-  createdAt: cashier.created_at
-}));
-
-    res.set('Cache-Control', 'no-store');
+    const cashiers = cashierResult.rows.map((cashier) => ({
+      id: String(cashier.user_id),
+      firstName: cashier.first_name,
+      lastName: cashier.last_name,
+      email: cashier.email,
+      role: cashier.role,
+      active: cashier.active,
+      createdAt: cashier.created_at
+    }));
 
     return res.status(200).json({
       data: cashiers,
@@ -122,10 +134,8 @@ const getCashiers = async (req, res) => {
 
     return res.status(500).json({
       error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Unable to retrieve cashier accounts',
-        fieldErrors: {},
-        details: {}
+        code: 'SERVER_ERROR',
+        message: 'Server error'
       }
     });
   }
@@ -133,46 +143,111 @@ const getCashiers = async (req, res) => {
 
 
 // POST: Create a new cashier account
+
+// POST: Create a new cashier account
 const createCashier = async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
   try {
+    const allowedFields = ['firstName', 'lastName', 'email', 'password'];
+
+    // Validate request body
+    if (
+      !req.body ||
+      typeof req.body !== 'object' ||
+      Array.isArray(req.body)
+    ) {
+      return res.status(422).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Invalid request body',
+          fieldErrors: {},
+          details: {}
+        }
+      });
+    }
+
+    const unknownFields = Object.keys(req.body).filter(
+      (field) => !allowedFields.includes(field)
+    );
+
+    if (unknownFields.length > 0) {
+      return res.status(422).json({
+        error: {
+          code: 'VALIDATION_ERROR',
+          message: 'Unknown fields in request body',
+          fieldErrors: {},
+          details: { unknownFields }
+        }
+      });
+    }
+
     const { firstName, lastName, email, password } = req.body;
 
     // Validate required fields
-    if (
-      typeof firstName !== 'string' ||
-      !firstName.trim() ||
-      typeof email !== 'string' ||
-      !email.trim() ||
-      typeof password !== 'string' ||
-      !password
-    ) {
-      return res.status(400).json({
+    const fieldErrors = {};
+
+    if (typeof firstName !== 'string' || !firstName.trim()) {
+      fieldErrors.firstName = 'First name is required';
+    }
+
+    if (typeof lastName !== 'string' || !lastName.trim()) {
+      fieldErrors.lastName = 'Last name is required';
+    }
+
+    if (typeof email !== 'string' || !email.trim()) {
+      fieldErrors.email = 'Email is required';
+    }
+
+    if (typeof password !== 'string' || !password) {
+      fieldErrors.password = 'Password is required';
+    }
+
+    if (Object.keys(fieldErrors).length > 0) {
+      return res.status(422).json({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'First name, email and password are required'
+          message: 'Required fields are missing or invalid',
+          fieldErrors,
+          details: {}
         }
       });
     }
 
     const cleanFirstName = firstName.trim();
-    const cleanLastName =
-      typeof lastName === 'string' && lastName.trim()
-        ? lastName.trim()
-        : null;
+    const cleanLastName = lastName.trim();
     const cleanEmail = email.trim().toLowerCase();
 
     // Validate field lengths
     if (
       cleanFirstName.length > 100 ||
-      (cleanLastName && cleanLastName.length > 100) ||
-      cleanEmail.length > 255 ||
+      cleanLastName.length > 100 ||
+      cleanEmail.length > 254 ||
       password.length < 8 ||
       password.length > 128
     ) {
-      return res.status(400).json({
+      return res.status(422).json({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'One or more fields have invalid lengths'
+          message: 'One or more fields have invalid lengths',
+          fieldErrors: {
+            ...(cleanFirstName.length > 100 && {
+              firstName: 'Maximum length is 100 characters'
+            }),
+            ...(cleanLastName.length > 100 && {
+              lastName: 'Maximum length is 100 characters'
+            }),
+            ...(cleanEmail.length > 254 && {
+              email: 'Maximum length is 254 characters'
+            }),
+            ...(password.length < 8 && {
+              password: 'Minimum length is 8 characters'
+            }),
+            ...(password.length > 128 && {
+              password: 'Maximum length is 128 characters'
+            })
+          },
+          details: {}
         }
       });
     }
@@ -181,10 +256,14 @@ const createCashier = async (req, res) => {
     const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
     if (!emailRegex.test(cleanEmail)) {
-      return res.status(400).json({
+      return res.status(422).json({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Invalid email address'
+          message: 'Invalid email address',
+          fieldErrors: {
+            email: 'Enter a valid email address'
+          },
+          details: {}
         }
       });
     }
@@ -198,7 +277,7 @@ const createCashier = async (req, res) => {
     if (existingUser.rows.length > 0) {
       return res.status(409).json({
         error: {
-          code: 'EMAIL_ALREADY_EXISTS',
+          code: 'EMAIL_IN_USE',
           message: 'An account with this email already exists'
         }
       });
@@ -218,8 +297,6 @@ const createCashier = async (req, res) => {
 
     const cashier = result.rows[0];
 
-    res.set('Cache-Control', 'no-store');
-
     return res.status(201).json({
       data: {
         id: String(cashier.user_id),
@@ -231,19 +308,33 @@ const createCashier = async (req, res) => {
         createdAt: cashier.created_at
       }
     });
+
   } catch (error) {
     console.error('Create cashier error:', error);
 
+    if (error.code === '23505') {
+      return res.status(409).json({
+        error: {
+          code: 'EMAIL_IN_USE',
+          message: 'An account with this email already exists'
+        }
+      });
+    }
+
     return res.status(500).json({
       error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'An unexpected error occurred'
+        code: 'SERVER_ERROR',
+        message: 'Server error'
       }
     });
   }
 };
+
+
 // GET: Retrieve theaters assigned to a cashier
 const getCashierTheaters = async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
   try {
     const cashierId = Number(req.params.id);
 
@@ -251,7 +342,9 @@ const getCashierTheaters = async (req, res) => {
       return res.status(422).json({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Invalid cashier ID'
+          message: 'Invalid cashier ID',
+          fieldErrors: {},
+          details: {}
         }
       });
     }
@@ -289,148 +382,150 @@ const getCashierTheaters = async (req, res) => {
         address: theater.address
       }))
     });
+
   } catch (error) {
     console.error('Get cashier theaters error:', error);
 
     return res.status(500).json({
       error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Unable to retrieve cashier theater assignments'
+        code: 'SERVER_ERROR',
+        message: 'Server error'
       }
     });
   }
 };
+
+
 // PUT: Replace cashier theater assignments
+
 const updateCashierTheaters = async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
+  const cashierId = Number(req.params.id);
+  const { theaterId } = req.body;
+
+  if (!Number.isInteger(cashierId) || cashierId <= 0) {
+    return res.status(400).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'Invalid cashier ID.',
+      },
+    });
+  }
+
+  if (
+    !req.body ||
+    typeof req.body !== 'object' ||
+    Array.isArray(req.body) ||
+    Object.keys(req.body).some((key) => key !== 'theaterId') ||
+    !Number.isInteger(theaterId) ||
+    theaterId <= 0
+  ) {
+    return res.status(422).json({
+      error: {
+        code: 'VALIDATION_ERROR',
+        message: 'A valid theaterId is required.',
+      },
+    });
+  }
+
   const client = await pool.connect();
 
   try {
-    const cashierId = Number(req.params.id);
-    const { theaterIds } = req.body;
-
-    if (!Number.isInteger(cashierId) || cashierId < 1) {
-      return res.status(422).json({
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'Invalid cashier ID'
-        }
-      });
-    }
-
-    if (
-      !Array.isArray(theaterIds) ||
-      !theaterIds.every(
-        (id) => Number.isInteger(id) && id > 0
-      ) ||
-      new Set(theaterIds).size !== theaterIds.length
-    ) {
-      return res.status(422).json({
-        error: {
-          code: 'VALIDATION_ERROR',
-          message: 'theaterIds must be an array of unique positive integers'
-        }
-      });
-    }
-
     await client.query('BEGIN');
 
     const cashierResult = await client.query(
       `SELECT user_id
        FROM users
-       WHERE user_id = $1 AND role = 'cashier'
-       FOR UPDATE`,
+       WHERE user_id = $1 AND role = 'cashier'`,
       [cashierId]
     );
 
-    if (cashierResult.rows.length === 0) {
+    if (cashierResult.rowCount === 0) {
       await client.query('ROLLBACK');
 
       return res.status(404).json({
         error: {
           code: 'CASHIER_NOT_FOUND',
-          message: 'Cashier not found'
-        }
+          message: 'Cashier not found.',
+        },
       });
     }
 
     const theaterResult = await client.query(
-      `SELECT theater_id
+      `SELECT theater_id, name, city, address
        FROM theaters
-       WHERE theater_id = ANY($1::integer[])`,
-      [theaterIds]
+       WHERE theater_id = $1`,
+      [theaterId]
     );
 
-    if (theaterResult.rows.length !== theaterIds.length) {
+    if (theaterResult.rowCount === 0) {
       await client.query('ROLLBACK');
 
       return res.status(422).json({
         error: {
           code: 'INVALID_THEATER_IDS',
-          message: 'One or more theater IDs do not exist'
-        }
+          message: 'The selected theater does not exist.',
+        },
       });
     }
 
     await client.query(
-      'DELETE FROM cashier_theaters WHERE cashier_id = $1',
+      `DELETE FROM cashier_theaters
+       WHERE cashier_id = $1`,
       [cashierId]
     );
 
-    for (const theaterId of theaterIds) {
-      await client.query(
-        `INSERT INTO cashier_theaters (cashier_id, theater_id)
-         VALUES ($1, $2)`,
-        [cashierId, theaterId]
-      );
-    }
+    await client.query(
+      `INSERT INTO cashier_theaters (cashier_id, theater_id)
+       VALUES ($1, $2)`,
+      [cashierId, theaterId]
+    );
 
     await client.query('COMMIT');
 
-    const result = await client.query(
-      `SELECT t.theater_id, t.name, t.city, t.address
-       FROM cashier_theaters ct
-       JOIN theaters t ON t.theater_id = ct.theater_id
-       WHERE ct.cashier_id = $1
-       ORDER BY t.theater_id`,
-      [cashierId]
-    );
-
     return res.status(200).json({
-      data: result.rows.map((theater) => ({
-        id: theater.theater_id,
-        name: theater.name,
-        city: theater.city,
-        address: theater.address
-      }))
+      data: [
+        {
+          id: theaterResult.rows[0].theater_id,
+          name: theaterResult.rows[0].name,
+          city: theaterResult.rows[0].city,
+          address: theaterResult.rows[0].address,
+        },
+      ],
     });
   } catch (error) {
     await client.query('ROLLBACK');
-
-    console.error('Update cashier theaters error:', error);
+    console.error('Error updating cashier theater:', error);
 
     return res.status(500).json({
       error: {
         code: 'INTERNAL_SERVER_ERROR',
-        message: 'Unable to update cashier theater assignments'
-      }
+        message: 'Failed to update cashier theater assignment.',
+      },
     });
   } finally {
     client.release();
   }
 };
 
+
 // PATCH: Activate or deactivate a cashier account
 const updateCashier = async (req, res) => {
+  res.set('Cache-Control', 'no-store');
+
   try {
     const cashierId = Number(req.params.id);
-    const { active } = req.body;
+    const { active } = req.body || {};
 
     // Validate cashier ID
     if (!Number.isInteger(cashierId) || cashierId < 1) {
       return res.status(422).json({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Invalid cashier ID'
+          message: 'Invalid cashier ID',
+          fieldErrors: {},
+          details: {}
         }
       });
     }
@@ -440,7 +535,11 @@ const updateCashier = async (req, res) => {
       return res.status(422).json({
         error: {
           code: 'VALIDATION_ERROR',
-          message: 'Active must be a boolean value'
+          message: 'Active must be a boolean value',
+          fieldErrors: {
+            active: 'Active must be a boolean value'
+          },
+          details: {}
         }
       });
     }
@@ -472,8 +571,6 @@ const updateCashier = async (req, res) => {
 
     const cashier = result.rows[0];
 
-    res.set('Cache-Control', 'no-store');
-
     return res.status(200).json({
       data: {
         id: String(cashier.user_id),
@@ -485,13 +582,14 @@ const updateCashier = async (req, res) => {
         createdAt: cashier.created_at
       }
     });
+
   } catch (error) {
     console.error('Update cashier error:', error);
 
     return res.status(500).json({
       error: {
-        code: 'INTERNAL_SERVER_ERROR',
-        message: 'Unable to update cashier account'
+        code: 'SERVER_ERROR',
+        message: 'Server error'
       }
     });
   }
