@@ -7,6 +7,7 @@ function httpError(status, code, message, { fieldErrors = {}, details = {} } = {
   err.code = code;
   err.fieldErrors = fieldErrors;
   err.details = details;
+  err.expose = true; // our own message, safe to send to the client
   return err;
 }
 

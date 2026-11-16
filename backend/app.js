@@ -30,6 +30,14 @@ app.use(
   })
 );
 
+// Stripe webhook: must get the RAW request body to verify Stripe's
+// signature, so it is registered BEFORE express.json().
+app.post(
+  '/api/stripe/webhook',
+  express.raw({ type: 'application/json', limit: '256kb' }),
+  require('./src/controllers/stripeWebhookController').stripeWebhook
+);
+
 // Read JSON request bodies, maximum 64 KiB (contract 2).
 app.use(express.json({ limit: '64kb' }));
 
@@ -88,8 +96,8 @@ app.use((err, req, res, next) => {
     return send(413, 'PAYLOAD_TOO_LARGE', 'The request body is too large.');
   }
 
-  // Our own errors (404, 409, 422...) are safe to show to the client.
-  if (err.status && err.status < 500) {
+  // Our own errors (404, 409, 422, 502 payment provider...) are safe to show.
+  if (err.status && (err.status < 500 || err.expose === true)) {
     return send(err.status, err.code, err.message, err.fieldErrors, err.details);
   }
 

@@ -6,7 +6,7 @@
 //                    a seat flagged as the owner's, or a blocked seat
 //   booked         - in a confirmed (paid) booking
 //   held           - in an active hold that has not expired,
-//                    or in a booking still waiting for payment
+//                    or in a booking still waiting for Stripe payment
 //   staff_reserved - (no staff reservations table yet)
 //   available      - everything else
 //
@@ -33,6 +33,8 @@ function seatStatusSql(screeningRef, seatRef) {
          WHERE bs.screening_id = ${screeningRef}
            AND bs.seat_id = ${seatRef}.seat_id
            AND b.booking_status = 'pending'
+           -- unpaid Stripe checkout; 10 minutes of grace for a late webhook
+           AND (b.expires_at IS NULL OR b.expires_at + INTERVAL '10 minutes' > NOW())
       ) OR EXISTS (
         SELECT 1 FROM seat_holds h
          WHERE h.screening_id = ${screeningRef}
