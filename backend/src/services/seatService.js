@@ -73,4 +73,18 @@ async function getSeatMap(screeningId) {
   };
 }
 
-module.exports = { getSeatMap, columnIndexFor };
+// Seat labels for a whole room, in the same order as the seat map, so a
+// booking receipt shows exactly what the customer saw.
+// Returns Map(seat_id -> { label, rowLabel }).
+async function seatLabelsForRoom(db, roomId) {
+  const { rows } = await db.query(
+    `SELECT seat_id, row_number FROM seats
+      WHERE room_id = $1
+      ORDER BY row_number, seat_number`,
+    [roomId]
+  );
+  const labels = snakeLabels();
+  return new Map(rows.map((r) => [r.seat_id, { label: labels.next().value, rowLabel: String(r.row_number) }]));
+}
+
+module.exports = { getSeatMap, columnIndexFor, seatLabelsForRoom };

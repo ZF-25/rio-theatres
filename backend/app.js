@@ -32,6 +32,13 @@ app.use(
   })
 );
 
+// Stripe webhook MUST receive the raw body before express.json().
+app.post(
+  '/api/stripe/webhook',
+  express.raw({ type: 'application/json', limit: '256kb' }),
+  require('./src/controllers/stripeWebhookController').stripeWebhook
+);
+
 // Parse JSON request bodies (maximum 64 KB).
 app.use(express.json({ limit: '64kb' }));
 
@@ -57,7 +64,7 @@ app.get('/api/db-check', async (req, res, next) => {
   }
 });
 
-// Main versioned API (catalogue and other public endpoints).
+// Main versioned API (catalogue, screenings, holds, etc.).
 app.use('/api/v1', require('./src/routes/v1'));
 
 // Authentication API.
@@ -65,7 +72,6 @@ app.use('/api/v1/auth', require('./src/routes/auth'));
 
 // Temporary compatibility with the old frontend.
 app.use('/api/auth', require('./src/routes/auth'));
-
 
 // Owner API: cashier management.
 app.use(
@@ -121,7 +127,7 @@ app.use((err, req, res, next) => {
     );
   }
 
-  // Request body exceeds 64 KB.
+  // Request body exceeds the allowed limit.
   if (err.type === 'entity.too.large') {
     return sendError(
       413,
@@ -130,13 +136,13 @@ app.use((err, req, res, next) => {
     );
   }
 
-  const status =
-    Number.isInteger(err.status) && err.status >= 400 && err.status < 500
-      ? err.status
-      : 500;
+  // Expected client errors and explicitly exposed errors.
+  const status = Number.isInteger(err.status) ? err.status : 500;
 
-  // Expected client errors.
-  if (status < 500) {
+  if (
+    (status >= 400 && status < 500) ||
+    (status >= 500 && err.expose === true)
+  ) {
     return sendError(
       status,
       err.code || 'REQUEST_ERROR',
