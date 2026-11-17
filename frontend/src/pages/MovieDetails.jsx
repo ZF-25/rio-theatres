@@ -1,30 +1,33 @@
 /*
  * FILE: frontend/src/pages/MovieDetails.jsx
  *
- * Displays detailed information about a selected movie
- * and helps customers find available cinema screenings.
+ * PURPOSE
+ * -------
+ * Displays movie information and available screenings.
  *
- * The page shows:
- * - Movie poster, title, description, and genres.
- * - Age rating and running time.
- * - A link to the movie trailer, when available.
- * - Cinema and room selection.
- * - Screening dates, times, and available seat counts.
+ * DATA SOURCES
+ * ------------
+ * Catalogue service:
+ * - Movie details.
+ * - Cinemas.
+ * - Rooms.
+ * - Screening times.
  *
- * Movie, cinema, room, and screening information
- * is loaded through the catalogue service.
+ * Booking configuration:
+ * - Determines whether this catalogue can enter the booking flow.
  *
- * ROUTE:
- * /movies/:movieId
+ * NAVIGATION
+ * ----------
+ * onBack():
+ * Returns to Home's movies section.
  *
- * PROPS:
- * city: Cinema city selected on the Home page.
- * onBack: Function for returning to the movie section.
- * onChooseSeats: Function for starting seat selection.
+ * onChooseSeats(screeningId):
+ * App opens the service-based Seat Selection page.
  *
- * IMPORTANT:
- * Seat selection is temporarily disabled in this version.
- * The booking service will be connected in a later batch.
+ * IMPORTANT
+ * ---------
+ * This page does not create holds or bookings.
+ * Seat Selection creates a hold after the customer chooses seats.
  */
 
 import {
@@ -35,11 +38,25 @@ import {
   useSyncExternalStore,
 } from "react";
 
-import { useParams } from "react-router-dom";
+import {
+  useParams,
+} from "react-router-dom";
 
-import { catalogue } from "../services/catalogue.js";
-import { collectPages } from "../services/apiCatalogue.js";
-import { useResource } from "../hooks/useResource.js";
+import {
+  catalogue,
+} from "../services/catalogue.js";
+
+import {
+  bookingEnabled,
+} from "../services/booking.js";
+
+import {
+  collectPages,
+} from "../services/apiCatalogue.js";
+
+import {
+  useResource,
+} from "../hooks/useResource.js";
 
 import {
   cinemaDate,
@@ -47,38 +64,16 @@ import {
 } from "../utils/cinemaTime.js";
 
 import RequestState from "../components/RequestState.jsx";
+
 import fallbackPoster from "../assets/fallback-poster.png";
 
 
 /*
- * TEMPORARY BOOKING CONFIGURATION
+ * ROUTE WRAPPER
  *
- * Booking is disabled until the booking services
- * and authentication dependencies are ready.
+ * Reads movieId from /movies/:movieId.
  *
- * In a later batch, this constant will be replaced
- * with an import from the booking service.
- *
- * Keeping this false allows customers to browse
- * screenings without starting an unfinished checkout.
- */
-const bookingEnabled = false;
-
-
-/*
- * MOVIE DETAILS PAGE
- *
- * Reads the movie ID from the current URL.
- *
- * useParams() gets route parameters from React Router.
- *
- * For example:
- * /movies/movie-123
- *
- * movieId would be "movie-123".
- *
- * The key={movieId} causes MovieDetailsContent to reset
- * its local state when the user opens a different movie.
+ * Changing movie URLs resets the inner page's local selectors.
  */
 function MovieDetails({
   city,
@@ -99,15 +94,6 @@ function MovieDetails({
 }
 
 
-/*
- * MOVIE DETAILS CONTENT
- *
- * Handles the page's data loading, filter selections,
- * screening discovery, and displayed movie information.
- *
- * Separating this component from MovieDetails allows
- * React to reset its state when the movie ID changes.
- */
 function MovieDetailsContent({
   movieId,
   city,
@@ -115,17 +101,10 @@ function MovieDetailsContent({
   onChooseSeats,
 }) {
   /*
-   * SCREENING SELECTION STATE
+   * CUSTOMER SELECTIONS
    *
-   * Stores the customer's current screening filters.
-   *
-   * cinemaId: Selected cinema.
-   * roomId: Selected auditorium.
-   * screeningId: Selected screening.
-   * date: Selected screening date.
-   *
-   * cinemaDate() uses the current date in Finland,
-   * rather than the visitor's browser time zone.
+   * IDs come from the selected catalogue service.
+   * date is a Helsinki calendar date.
    */
   const [selection, setSelection] = useState({
     cinemaId: "",
@@ -134,106 +113,74 @@ function MovieDetailsContent({
     date: cinemaDate(),
   });
 
-  /*
-   * POSTER ERROR STATE
-   *
-   * Remembers the URL of a poster that failed to load.
-   *
-   * This allows the page to display a fallback image
-   * instead of repeatedly trying the broken poster.
-   */
-  const [failedPoster, setFailedPoster] = useState(null);
+  const [failedPoster, setFailedPoster] =
+    useState(null);
 
-  /*
-   * MOVIE TITLE REFERENCE
-   *
-   * useRef() stores a reference to the movie heading.
-   *
-   * It is used to move keyboard focus to the title
-   * after the movie information has loaded.
-   */
   const headingRef = useRef(null);
 
 
   /*
-   * SUBSCRIBE TO CATALOGUE CHANGES
+   * SHARED DEMO UPDATES
    *
-   * useSyncExternalStore() connects this component
-   * to the catalogue's shared data store.
-   *
-   * In demo mode, changes made by an owner can
-   * trigger the screening list to refresh.
-   *
-   * In API mode, the snapshot remains stable.
-   * This does not provide live WebSocket updates.
+   * Demo store changes refresh the screening list.
+   * API mode uses a stable snapshot; this is not a server
+   * WebSocket subscription.
    */
-  const catalogueSnapshot = useSyncExternalStore(
-    catalogue.subscribe,
-    catalogue.getSnapshot,
-    catalogue.getSnapshot,
-  );
+  const catalogueSnapshot =
+    useSyncExternalStore(
+      catalogue.subscribe,
+      catalogue.getSnapshot,
+      catalogue.getSnapshot,
+    );
 
 
   /*
    * LOAD MOVIE DETAILS
-   *
-   * Requests information about the movie identified
-   * by the movieId from the URL.
-   *
-   * useCallback() keeps the loading function stable
-   * until movieId changes.
-   *
-   * signal allows an outdated request to be cancelled.
    */
   const loadMovie = useCallback(
-    (signal) =>
-      catalogue.getMovie(movieId, { signal }),
+    (signal) => {
+      return catalogue.getMovie(
+        movieId,
+        { signal },
+      );
+    },
     [movieId],
   );
 
-  /*
-   * useResource() handles loading, errors, and retrying.
-   *
-   * The service response contains the movie
-   * inside its data property.
-   */
-  const movieResult = useResource(loadMovie);
-  const movie = movieResult.data?.data;
+  const movieResult =
+    useResource(loadMovie);
+
+  const movie =
+    movieResult.data?.data;
 
 
   /*
-   * LOAD CINEMA LOCATIONS
+   * LOAD CINEMA OPTIONS
    *
-   * Requests all available cinemas from the catalogue.
-   *
-   * collectPages() retrieves results across multiple
-   * pages instead of loading only the first page.
-   *
-   * The empty dependency array means this loading
-   * function does not depend on changing component values.
+   * Collect every page of this small reference list.
    */
   const loadCinemas = useCallback(
-    (signal) =>
-      collectPages(catalogue.listCinemas, { signal }),
+    (signal) => {
+      return collectPages(
+        catalogue.listCinemas,
+        { signal },
+      );
+    },
     [],
   );
 
-  const cinemasResult = useResource(loadCinemas);
-  const cinemas = cinemasResult.data ?? [];
+  const cinemasResult =
+    useResource(loadCinemas);
+
+  const cinemas =
+    cinemasResult.data ?? [];
 
 
   /*
-   * CHOOSE THE CURRENT CINEMA
+   * RESOLVE CINEMA
    *
-   * Determines which cinema should be displayed.
-   *
-   * Priority:
-   * 1. Cinema selected on this page.
-   * 2. Cinema city selected on the Home page.
-   * 3. First cinema returned by the catalogue.
-   *
-   * The ?? operator uses the next option
-   * when the previous result is null or undefined.
+   * Prefer the current selection, then App's preferred city,
+   * then the first available cinema.
    */
   const cinema =
     cinemas.find(
@@ -246,16 +193,7 @@ function MovieDetailsContent({
 
 
   /*
-   * LOAD CINEMA ROOMS
-   *
-   * Requests the rooms belonging to the selected cinema.
-   *
-   * If no cinema is available, an empty array is returned.
-   *
-   * collectPages() loads all room records.
-   *
-   * The function is recreated when the selected
-   * cinema changes so the correct rooms are loaded.
+   * LOAD ROOMS FOR THE SELECTED CINEMA
    */
   const loadRooms = useCallback(
     (signal) => {
@@ -264,30 +202,25 @@ function MovieDetailsContent({
       }
 
       return collectPages(
-        (query, options) =>
-          catalogue.listRooms(
+        (query, options) => {
+          return catalogue.listRooms(
             cinema.id,
             query,
             options,
-          ),
+          );
+        },
         { signal },
       );
     },
     [cinema],
   );
 
-  const roomsResult = useResource(loadRooms);
-  const rooms = roomsResult.data ?? [];
+  const roomsResult =
+    useResource(loadRooms);
 
+  const rooms =
+    roomsResult.data ?? [];
 
-  /*
-   * CHOOSE THE CURRENT ROOM
-   *
-   * Uses the room selected by the customer.
-   *
-   * If no room has been selected, the first
-   * available room is used instead.
-   */
   const room =
     rooms.find(
       (item) => item.id === selection.roomId,
@@ -295,19 +228,10 @@ function MovieDetailsContent({
 
 
   /*
-   * LOAD AVAILABLE SCREENINGS
+   * LOAD MATCHING SCREENINGS
    *
-   * Requests screenings matching the selected:
-   * - Movie.
-   * - Cinema.
-   * - Room.
-   * - Date.
-   *
-   * If required information is missing,
-   * the function returns an empty array.
-   *
-   * catalogueSnapshot is included as a dependency
-   * so demo store updates can refresh the results.
+   * The snapshot dependency refreshes demo results when the
+   * shared store changes.
    */
   const loadScreenings = useCallback(
     (signal) => {
@@ -320,24 +244,11 @@ function MovieDetailsContent({
         return Promise.resolve([]);
       }
 
-      /*
-       * References the current catalogue snapshot.
-       *
-       * The snapshot is also included in useCallback's
-       * dependency array so the function updates
-       * when the demo catalogue changes.
-       */
       void catalogueSnapshot;
 
-      /*
-       * Requests every page of matching screenings.
-       *
-       * The selected filters are added to the
-       * pagination query sent to the catalogue service.
-       */
       return collectPages(
-        (query, options) =>
-          catalogue.listScreenings(
+        (query, options) => {
+          return catalogue.listScreenings(
             {
               ...query,
               movieId,
@@ -346,7 +257,8 @@ function MovieDetailsContent({
               date: selection.date,
             },
             options,
-          ),
+          );
+        },
         { signal },
       );
     },
@@ -360,34 +272,22 @@ function MovieDetailsContent({
     ],
   );
 
-  const screeningsResult = useResource(loadScreenings);
-  const screenings = screeningsResult.data ?? [];
+  const screeningsResult =
+    useResource(loadScreenings);
+
+  const screenings =
+    screeningsResult.data ?? [];
+
+  const selectedScreening =
+    screenings.find((item) => {
+      return (
+        item.id === selection.screeningId
+      );
+    });
 
 
   /*
-   * FIND SELECTED SCREENING
-   *
-   * Searches the loaded screenings for the one
-   * selected by the customer.
-   *
-   * If no screening matches, the result is undefined.
-   */
-  const selectedScreening = screenings.find(
-    (item) => item.id === selection.screeningId,
-  );
-
-
-  /*
-   * FOCUS MOVIE TITLE
-   *
-   * Runs after movie information becomes available.
-   *
-   * Moves keyboard focus to the movie heading,
-   * helping keyboard and screen-reader users
-   * understand that a new movie page has loaded.
-   *
-   * preventScroll avoids automatically scrolling
-   * the page when focus changes.
+   * FOCUS THE ASYNCHRONOUSLY LOADED TITLE
    */
   useEffect(() => {
     if (movie) {
@@ -399,16 +299,7 @@ function MovieDetailsContent({
 
 
   /*
-   * UPDATE SCREENING FILTERS
-   *
-   * Updates one or more values in the selection state.
-   *
-   * The spread operators preserve existing values
-   * and replace only the values provided in patch.
-   *
-   * The selected screening is cleared whenever
-   * a filter changes because it might no longer
-   * match the selected cinema, room, or date.
+   * RESET SCREENING CHOICE WHEN ITS FILTERS CHANGE
    */
   function changeSelection(patch) {
     setSelection((previous) => ({
@@ -418,14 +309,6 @@ function MovieDetailsContent({
     }));
   }
 
-
-  /*
-   * RETRY CINEMA AND ROOM REQUESTS
-   *
-   * Calls the retry functions provided by useResource().
-   *
-   * Used when loading cinema or room information fails.
-   */
   function retryReferences() {
     cinemasResult.retry();
     roomsResult.retry();
@@ -433,19 +316,12 @@ function MovieDetailsContent({
 
 
   /*
-   * CHOOSE SCREENING
+   * OPEN SERVICE-BASED SEAT SELECTION
    *
-   * Will start the seat-selection process
-   * when the booking feature is connected.
+   * bookingEnabled checks catalogue/booking mode compatibility.
+   * API mode is no longer blocked simply because it is API mode.
    *
-   * Before continuing, checks that:
-   * - Booking is enabled.
-   * - The screening has available seats.
-   * - The parent supplied an onChooseSeats function.
-   *
-   * Available-seat counts are only a preview.
-   * The booking service must check availability again
-   * when creating a temporary seat hold.
+   * Availability is advisory. The hold service checks seats again.
    */
   function chooseScreening(screening) {
     if (
@@ -461,36 +337,31 @@ function MovieDetailsContent({
 
 
   /*
-   * HANDLE MISSING MOVIE INFORMATION
-   *
-   * Displays a loading message, error message,
-   * or movie-not-found message when necessary.
-   *
-   * A 404 response means the requested movie
-   * could not be found.
-   *
-   * Other request errors allow the customer
-   * to retry loading the movie.
+   * MOVIE LOADING / ERROR STATE
    */
   if (!movie) {
-    const notFound = movieResult.error?.status === 404;
+    const notFound =
+      movieResult.error?.status === 404;
 
     return (
       <section className="container catalogue-status">
         <h1 tabIndex={-1}>
-          {notFound ? "Movie not found" : "Movie details"}
+          {notFound
+            ? "Movie not found"
+            : "Movie details"}
         </h1>
 
         <RequestState
           loading={movieResult.loading}
           error={movieResult.error}
           onRetry={
-            notFound ? undefined : movieResult.retry
+            notFound
+              ? undefined
+              : movieResult.retry
           }
           loadingMessage="Loading movie details…"
         />
 
-        {/* Returns to the movie catalogue. */}
         <button
           type="button"
           className="secondary-button"
@@ -504,122 +375,81 @@ function MovieDetailsContent({
 
 
   /*
-   * PREPARE MOVIE INFORMATION
-   *
-   * Checks whether the movie has valid age-rating
-   * and running-time information.
-   *
-   * Missing values are displayed explicitly
-   * instead of showing incorrect information.
+   * DISPLAY FALLBACKS
    */
   const ratingLabel =
     movie.ageRating?.label == null
       ? ""
-      : String(movie.ageRating.label).trim();
+      : String(
+          movie.ageRating.label,
+        ).trim();
 
   const runtimeAvailable =
     Number.isInteger(movie.durationMinutes) &&
     movie.durationMinutes > 0;
 
-
-  /*
-   * HANDLE MISSING OR BROKEN POSTERS
-   *
-   * Uses the fallback poster when:
-   * - No poster URL exists.
-   * - The original poster failed to load.
-   *
-   * This prevents broken images from appearing
-   * on the Movie Details page.
-   */
   const posterUnavailable =
     !movie.posterUrl ||
     failedPoster === movie.posterUrl;
 
-  const posterSource = posterUnavailable
-    ? fallbackPoster
-    : movie.posterUrl;
+  const posterSource =
+    posterUnavailable
+      ? fallbackPoster
+      : movie.posterUrl;
 
 
   /*
-   * PREPARE TRAILER LINK
+   * SUPPORTED TRAILER LINK
    *
-   * Only YouTube trailers with a valid video ID
-   * are accepted.
-   *
-   * The regular expression allows letters,
-   * numbers, underscores, and hyphens.
-   *
-   * The URL is built from the video ID instead
-   * of directly displaying arbitrary backend HTML.
-   *
-   * If the trailer information is unsupported,
-   * trailerUrl becomes null.
+   * Build a known provider URL from videoId.
+   * Never render arbitrary backend HTML or put a YouTube watch
+   * URL inside a <video> element.
    */
   const trailer = movie.trailer;
 
   const supportedTrailer =
     trailer?.provider === "youtube" &&
     typeof trailer.videoId === "string" &&
-    /^[a-zA-Z0-9_-]{1,64}$/.test(trailer.videoId);
+    /^[a-zA-Z0-9_-]{1,64}$/.test(
+      trailer.videoId,
+    );
 
-  const trailerUrl = supportedTrailer
-    ? `https://www.youtube.com/watch?v=${encodeURIComponent(
-        trailer.videoId,
-      )}`
-    : null;
+  const trailerUrl =
+    supportedTrailer
+      ? `https://www.youtube.com/watch?v=${encodeURIComponent(
+          trailer.videoId,
+        )}`
+      : null;
 
 
   /*
-   * CHECK CINEMA AND ROOM REQUEST STATES
-   *
-   * referencesLoading is true while cinema
-   * or room information is being loaded.
-   *
-   * referencesError contains any request error.
-   *
-   * referencesReady is true only when loading
-   * has finished without an error.
+   * SELECTOR REQUEST STATES
    */
   const referencesLoading =
     cinemasResult.loading ||
-    Boolean(cinema && roomsResult.loading);
+    Boolean(
+      cinema && roomsResult.loading,
+    );
 
   const referencesError =
-    cinemasResult.error || roomsResult.error;
+    cinemasResult.error ||
+    roomsResult.error;
 
   const referencesReady =
-    !referencesLoading && !referencesError;
+    !referencesLoading &&
+    !referencesError;
 
-
-  /*
-   * CHECK WHETHER SCREENINGS CAN BE DISPLAYED
-   *
-   * Screening discovery requires:
-   * - Successfully loaded cinema and room information.
-   * - A valid selected cinema.
-   * - A valid selected room.
-   */
   const canShowScreenings =
     referencesReady &&
     Boolean(cinema) &&
     Boolean(room);
 
-  // Controls whether the seat-selection buttons are enabled.
-  const bookingConnected = bookingEnabled;
+  const bookingConnected =
+    bookingEnabled;
 
 
-  /*
-   * RENDER MOVIE DETAILS PAGE
-   *
-   * The layout contains two main sections:
-   *
-   * 1. Movie information.
-   * 2. Cinema and screening selection.
-   */
   return (
     <section className="container movie-details-section">
-      {/* Button for returning to the movie catalogue. */}
       <button
         type="button"
         className="movie-back-button"
@@ -630,32 +460,20 @@ function MovieDetailsContent({
       </button>
 
       <div className="details-page-layout">
-        {/*
-         * MOVIE INFORMATION
-         *
-         * Displays the movie poster, trailer link,
-         * title, age rating, runtime, genres,
-         * description, and language information.
-         */}
+        {/* MOVIE INFORMATION */}
         <article
           className="details-main"
           aria-labelledby="movie-details-title"
         >
-          {/*
-           * MOVIE POSTER AND TRAILER
-           *
-           * Displays the movie poster or fallback image.
-           *
-           * If a valid trailer is available,
-           * the customer can open it on YouTube.
-           */}
           <div className="details-trailer">
             <div className="details-trailer-placeholder">
               <img
                 src={posterSource}
                 alt=""
                 onError={() => {
-                  setFailedPoster(movie.posterUrl);
+                  setFailedPoster(
+                    movie.posterUrl,
+                  );
                 }}
               />
 
@@ -674,21 +492,14 @@ function MovieDetailsContent({
                     </span>
                   </a>
                 ) : (
-                  <span>Trailer unavailable</span>
+                  <span>
+                    Trailer unavailable
+                  </span>
                 )}
               </div>
             </div>
           </div>
 
-          {/*
-           * MOVIE TITLE
-           *
-           * ref connects the heading to headingRef.
-           *
-           * tabIndex={-1} allows the heading to receive
-           * programmatic focus without adding it
-           * to normal keyboard tab navigation.
-           */}
           <h1
             id="movie-details-title"
             ref={headingRef}
@@ -697,15 +508,6 @@ function MovieDetailsContent({
             {movie.title}
           </h1>
 
-          {/*
-           * MOVIE INFORMATION BADGES
-           *
-           * Displays age rating, running time,
-           * and all genres associated with the movie.
-           *
-           * Missing information receives a readable
-           * fallback message.
-           */}
           <ul
             className="details-badges"
             aria-label="Movie information"
@@ -729,17 +531,11 @@ function MovieDetailsContent({
             ))}
           </ul>
 
-          {/* Movie description with a fallback for missing text. */}
           <p className="details-description">
-            {movie.description || "Description unavailable."}
+            {movie.description ||
+              "Description unavailable."}
           </p>
 
-          {/*
-           * AGE-RATING NOTICE
-           *
-           * Reminds customers to check whether
-           * the movie is suitable before booking.
-           */}
           <p className="details-age-notice">
             {ratingLabel
               ? `Age rating: ${ratingLabel}. Check suitability before selecting tickets.`
@@ -747,16 +543,8 @@ function MovieDetailsContent({
           </p>
 
           {/*
-           * SCREENING LANGUAGE AND SUBTITLES
-           *
-           * Language and subtitle information belongs
-           * to the selected screening.
-           *
-           * Different screenings of the same movie
-           * may have different language options.
-           *
-           * This section appears only when a screening
-           * has been selected.
+           * Performance language/subtitles belong to the selected
+           * screening, not the movie's original-language metadata.
            */}
           {selectedScreening && (
             <dl className="details-language">
@@ -773,7 +561,9 @@ function MovieDetailsContent({
                 <div>
                   <dt>Subtitles</dt>
                   <dd>
-                    {selectedScreening.subtitles.join(", ")}
+                    {selectedScreening.subtitles.join(
+                      ", ",
+                    )}
                   </dd>
                 </div>
               )}
@@ -782,18 +572,7 @@ function MovieDetailsContent({
         </article>
 
 
-        {/*
-         * SCREENING DISCOVERY PANEL
-         *
-         * Allows customers to select:
-         * - Cinema.
-         * - Room.
-         * - Screening time.
-         * - Screening date.
-         *
-         * Also displays seat availability
-         * and request loading/error states.
-         */}
+        {/* SCREENING SELECTION */}
         <aside
           className="screening-panel"
           aria-labelledby="screening-panel-title"
@@ -802,14 +581,6 @@ function MovieDetailsContent({
             Choose cinema, room & screening
           </h2>
 
-          {/*
-           * CINEMA AND ROOM LOADING STATUS
-           *
-           * RequestState displays loading and error messages.
-           *
-           * The retry button reloads cinema
-           * and room information when necessary.
-           */}
           <RequestState
             loading={referencesLoading}
             error={referencesError}
@@ -818,17 +589,6 @@ function MovieDetailsContent({
           />
 
           <div className="screening-selectors">
-            {/*
-             * CINEMA SELECTOR
-             *
-             * Displays all available cinemas.
-             *
-             * Changing the cinema also clears
-             * the selected room and screening.
-             *
-             * The selector is disabled when cinema
-             * information is unavailable or loading.
-             */}
             <label htmlFor="details-cinema">
               <span>Cinema</span>
 
@@ -848,7 +608,9 @@ function MovieDetailsContent({
                 }}
               >
                 {cinemas.length === 0 && (
-                  <option value="">No cinemas</option>
+                  <option value="">
+                    No cinemas
+                  </option>
                 )}
 
                 {cinemas.map((item) => (
@@ -862,17 +624,6 @@ function MovieDetailsContent({
               </select>
             </label>
 
-
-            {/*
-             * ROOM SELECTOR
-             *
-             * Displays rooms belonging to the selected cinema.
-             *
-             * Changing the room clears the selected screening.
-             *
-             * The selector is disabled while required
-             * information is loading or unavailable.
-             */}
             <label htmlFor="details-room">
               <span>Room</span>
 
@@ -891,7 +642,9 @@ function MovieDetailsContent({
                 }}
               >
                 {rooms.length === 0 && (
-                  <option value="">No rooms</option>
+                  <option value="">
+                    No rooms
+                  </option>
                 )}
 
                 {rooms.map((item) => (
@@ -905,32 +658,25 @@ function MovieDetailsContent({
               </select>
             </label>
 
-
-            {/*
-             * SCREENING SELECTOR
-             *
-             * Displays the available screening times
-             * for the selected movie, cinema, room, and date.
-             *
-             * cinemaTime() converts each screening timestamp
-             * into Finnish local time.
-             *
-             * Selecting an option saves its screening ID.
-             */}
             <label htmlFor="details-screening">
               <span>Screening</span>
 
               <select
                 id="details-screening"
-                value={selectedScreening?.id ?? ""}
+                value={
+                  selectedScreening?.id ?? ""
+                }
                 disabled={
                   !canShowScreenings ||
                   screeningsResult.loading ||
-                  Boolean(screeningsResult.error) ||
+                  Boolean(
+                    screeningsResult.error,
+                  ) ||
                   screenings.length === 0
                 }
                 onChange={(event) => {
-                  const screeningId = event.target.value;
+                  const screeningId =
+                    event.target.value;
 
                   setSelection((previous) => ({
                     ...previous,
@@ -949,26 +695,15 @@ function MovieDetailsContent({
                     key={item.id}
                     value={item.id}
                   >
-                    {cinemaTime(item.startsAt)}
+                    {cinemaTime(
+                      item.startsAt,
+                    )}
                   </option>
                 ))}
               </select>
             </label>
           </div>
 
-
-          {/*
-           * SCREENING DATE SELECTOR
-           *
-           * Allows customers to choose a screening date.
-           *
-           * The input uses YYYY-MM-DD format.
-           *
-           * min={cinemaDate()} prevents choosing
-           * dates before today in Finland.
-           *
-           * Changing the date clears the selected screening.
-           */}
           <label
             className="screening-date"
             htmlFor="details-date"
@@ -988,16 +723,6 @@ function MovieDetailsContent({
             />
           </label>
 
-
-          {/*
-           * ROOM SUMMARY
-           *
-           * Shows the selected cinema city,
-           * room name, and seating capacity.
-           *
-           * Only appears when both cinema
-           * and room information are available.
-           */}
           {cinema && room && (
             <p className="screening-room-summary">
               {cinema.city}
@@ -1008,13 +733,6 @@ function MovieDetailsContent({
             </p>
           )}
 
-
-          {/*
-           * NO CINEMAS MESSAGE
-           *
-           * Appears when cinema loading has finished
-           * successfully but no cinema is available.
-           */}
           {referencesReady && !cinema && (
             <p
               className="screening-empty-message"
@@ -1024,13 +742,6 @@ function MovieDetailsContent({
             </p>
           )}
 
-
-          {/*
-           * NO ROOMS MESSAGE
-           *
-           * Appears when the selected cinema
-           * does not have any available rooms.
-           */}
           {referencesReady && cinema && !room && (
             <p
               className="screening-empty-message"
@@ -1040,39 +751,21 @@ function MovieDetailsContent({
             </p>
           )}
 
-
-          {/*
-           * AVAILABLE SCREENINGS
-           *
-           * Displays screening request status
-           * and the available screening times.
-           *
-           * This section appears only when
-           * a valid cinema and room are available.
-           */}
           {canShowScreenings && (
             <>
               <RequestState
-                loading={screeningsResult.loading}
-                error={screeningsResult.error}
-                onRetry={screeningsResult.retry}
+                loading={
+                  screeningsResult.loading
+                }
+                error={
+                  screeningsResult.error
+                }
+                onRetry={
+                  screeningsResult.retry
+                }
                 loadingMessage="Loading screenings…"
               />
 
-              {/*
-               * SCREENING TIME BUTTONS
-               *
-               * Displays each screening as a button.
-               *
-               * Each button shows:
-               * - Screening time in Finland.
-               * - Sold-out status or available seat count.
-               *
-               * Buttons are disabled when:
-               * - The screening is sold out.
-               * - Booking is not connected.
-               * - The seat-selection callback is missing.
-               */}
               {!screeningsResult.loading &&
                 !screeningsResult.error && (
                   <div className="screening-times">
@@ -1093,13 +786,16 @@ function MovieDetailsContent({
                             disabled={
                               soldOut ||
                               !bookingConnected ||
-                              typeof onChooseSeats !== "function"
+                              typeof onChooseSeats !==
+                                "function"
                             }
                             onClick={() => {
                               chooseScreening(item);
                             }}
                           >
-                            {cinemaTime(item.startsAt)}
+                            {cinemaTime(
+                              item.startsAt,
+                            )}
                             {" · "}
 
                             {soldOut
@@ -1109,12 +805,6 @@ function MovieDetailsContent({
                         );
                       })
                     ) : (
-                      /*
-                       * NO SCREENINGS MESSAGE
-                       *
-                       * Explains that no screenings match
-                       * the selected date and room.
-                       */
                       <p
                         className="screening-empty-message"
                         role="status"
@@ -1127,19 +817,11 @@ function MovieDetailsContent({
                   </div>
                 )}
 
-              {/*
-               * BOOKING NOT CONNECTED MESSAGE
-               *
-               * In this development batch, customers
-               * can view screenings but cannot book seats.
-               *
-               * This message explains why the
-               * seat-selection buttons are disabled.
-               */}
               {!bookingConnected &&
                 screenings.length > 0 && (
                   <p className="screening-empty-message">
-                    Seat selection will be added in the next batch.
+                    Booking is unavailable because the
+                    catalogue and booking modes do not match.
                   </p>
                 )}
             </>
@@ -1150,11 +832,4 @@ function MovieDetailsContent({
   );
 }
 
-
-/*
- * EXPORT MOVIE DETAILS
- *
- * Makes MovieDetails available for importing
- * into the application's routing configuration.
- */
 export default MovieDetails;
