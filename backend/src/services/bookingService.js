@@ -305,8 +305,8 @@ async function createBooking(owner, idempotencyKey, rawBody) {
             client_reference_id: reference,
             metadata: { reference },
             expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SECONDS,
-            success_url: `${frontend}/bookings/${reference}?checkout=success`,
-            cancel_url: `${frontend}/bookings/${reference}?checkout=cancelled`,
+            success_url: `${frontend}/bookings/${reference}/confirmation?checkout=success`,
+            cancel_url: `${frontend}/bookings/${reference}/confirmation?checkout=cancelled`,
           });
         } catch (err) {
           // Nothing is saved: the transaction rolls back and the hold stays active.
