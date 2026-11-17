@@ -1,18 +1,17 @@
 /*
  * FILE: frontend/src/App.jsx
  *
- * Includes:
- * - Customer catalogue.
- * - Movie details and screening discovery.
- * - Customer registration, login and logout.
+ * Includes customer catalogue/authentication and staff login.
+ * Owner/cashier workspaces are previews in this batch.
  *
- * Booking and staff workspaces arrive in later batches.
- * main.jsx already supplies BrowserRouter and AuthProvider.
+ * Route guards control the interface only.
+ * Backend authorization remains necessary after integration.
  */
 
 import { useEffect, useState } from "react";
 
 import {
+  Navigate,
   Route,
   Routes,
   useLocation,
@@ -25,10 +24,13 @@ import CatalogueHome from "./pages/CatalogueHome.jsx";
 import MovieDetails from "./pages/MovieDetails.jsx";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
+import StaffLogin from "./pages/StaffLogin.jsx";
 
 import RequestState from "./components/RequestState.jsx";
 
 import { useAuth } from "./hooks/useAuth.js";
+import { useStaffSession } from "./hooks/useStaffSession.js";
+import { getUserDisplayName } from "./utils/userName.js";
 
 import "./App.css";
 
@@ -48,7 +50,6 @@ function FeaturePlaceholder({
   return (
     <section className="container section">
       <h1>{title}</h1>
-
       <p>{children}</p>
 
       <button
@@ -62,6 +63,77 @@ function FeaturePlaceholder({
   );
 }
 
+/*
+ * Temporary protected workspace.
+ *
+ * A cashier cannot open the owner preview, and an anonymous
+ * visitor is returned to staff login.
+ */
+function StaffWorkspace({
+  role,
+  session,
+  onLogout,
+}) {
+  if (session.isSessionLoading) {
+    return (
+      <RequestState
+        loading
+        loadingMessage="Checking staff access…"
+      />
+    );
+  }
+
+  if (session.status === "error") {
+    return (
+      <RequestState
+        error={session.sessionError}
+        onRetry={() => session.refreshSession()}
+      />
+    );
+  }
+
+  if (
+    !session.enabled ||
+    session.staff?.role !== role
+  ) {
+    return <Navigate to="/staff/login" replace />;
+  }
+
+  return (
+    <section className="container section">
+      <p className="eyebrow">
+        STAFF WORKSPACE PREVIEW
+      </p>
+
+      <h1>
+        {role === "owner"
+          ? "Owner workspace"
+          : "Cashier workspace"}
+      </h1>
+
+      <p>
+        Signed in as {getUserDisplayName(session.staff)}.
+      </p>
+
+      <p>
+        Staff login is available. Workspace management features
+        will be added in later commits.
+      </p>
+
+      <button
+        type="button"
+        className="secondary-button"
+        onClick={onLogout}
+        disabled={session.isSubmitting}
+      >
+        {session.isSubmitting
+          ? "Signing out…"
+          : "Log out of staff account"}
+      </button>
+    </section>
+  );
+}
+
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [city, setCity] = useState("Oulu");
@@ -70,10 +142,6 @@ function App() {
   const navigate = useNavigate();
   const location = useLocation();
 
-  /*
-   * Identity and authentication actions come from AuthProvider.
-   * App does not submit login credentials itself.
-   */
   const {
     user,
     isCustomer,
@@ -82,9 +150,9 @@ function App() {
     logout,
   } = useAuth();
 
-  /*
-   * Scroll to home sections after catalogue content mounts.
-   */
+  const staffSession = useStaffSession();
+
+  // Restore section scrolling after catalogue content loads.
   useEffect(() => {
     if (location.pathname !== "/") {
       window.scrollTo({ top: 0 });
@@ -167,10 +235,7 @@ function App() {
     navigate("/register");
   }
 
-  /*
-   * Login/Register already performed authentication.
-   * Their success callback only handles navigation here.
-   */
+  // Authentication is already performed by Login/Register.
   function handleAuthenticated() {
     setLogoutError(null);
     setMenuOpen(false);
@@ -180,10 +245,6 @@ function App() {
     });
   }
 
-  /*
-   * Only navigate after logout succeeds.
-   * A failure remains visible and can be retried.
-   */
   async function handleLogout() {
     if (isSubmitting || isSessionLoading) return;
 
@@ -192,8 +253,45 @@ function App() {
 
     try {
       await logout();
+      navigate("/", { replace: true });
+    } catch (error) {
+      setLogoutError(error);
+    }
+  }
 
-      navigate("/", {
+  /*
+   * StaffLogin authenticates once and passes its staff profile.
+   * Open the workspace belonging to the returned role.
+   */
+  function handleStaffAuthenticated(account) {
+    if (
+      !["owner", "cashier"].includes(account?.role)
+    ) {
+      throw new Error(
+        "An owner or cashier account is required.",
+      );
+    }
+
+    setMenuOpen(false);
+    setLogoutError(null);
+
+    navigate(
+      account.role === "owner"
+        ? "/admin"
+        : "/cashier",
+      { replace: true },
+    );
+  }
+
+  async function handleStaffLogout() {
+    if (staffSession.isSubmitting) return;
+
+    setLogoutError(null);
+
+    try {
+      await staffSession.logout();
+
+      navigate("/staff/login", {
         replace: true,
       });
     } catch (error) {
@@ -204,20 +302,20 @@ function App() {
   const backToMovies = () =>
     navigateHome(undefined, "movies");
 
+  const viewingStaffWorkspace =
+    location.pathname.startsWith("/admin") ||
+    location.pathname.startsWith("/cashier");
+
   return (
     <CustomerLayout
       onLogoClick={(event) => navigateHome(event)}
       headerProps={{
         menuOpen,
         setMenuOpen,
-
-        // Show customer controls only for a customer identity.
         user: isCustomer ? user : null,
-
         navigateHome,
         openLogin,
         handleLogout,
-
         openBookingHistory: () => {
           navigate("/my-bookings");
         },
@@ -227,7 +325,11 @@ function App() {
         <div className="container">
           <RequestState
             error={logoutError}
-            onRetry={handleLogout}
+            onRetry={
+              viewingStaffWorkspace
+                ? handleStaffLogout
+                : handleLogout
+            }
           />
         </div>
       )}
@@ -281,12 +383,32 @@ function App() {
         <Route
           path="/staff/login"
           element={
-            <FeaturePlaceholder
-              title="Staff login"
-              onBack={backToMovies}
-            >
-              The staff workspace will be added in a later batch.
-            </FeaturePlaceholder>
+            <StaffLogin
+              onAuthenticated={handleStaffAuthenticated}
+              onCustomerLogin={openLogin}
+            />
+          }
+        />
+
+        <Route
+          path="/admin"
+          element={
+            <StaffWorkspace
+              role="owner"
+              session={staffSession}
+              onLogout={handleStaffLogout}
+            />
+          }
+        />
+
+        <Route
+          path="/cashier"
+          element={
+            <StaffWorkspace
+              role="cashier"
+              session={staffSession}
+              onLogout={handleStaffLogout}
+            />
           }
         />
 
