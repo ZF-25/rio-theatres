@@ -1,10 +1,9 @@
 /*
  * FILE: frontend/src/App.jsx
  *
- * BATCH 2
- * Working homepage and movie catalogue.
+ * Customer catalogue, movie details and screening discovery.
+ * Authentication and booking are added in later batches.
  *
- * Movie details, authentication and booking are added later.
  * main.jsx already supplies BrowserRouter.
  */
 
@@ -19,6 +18,7 @@ import {
 
 import CustomerLayout from "./layouts/CustomerLayout.jsx";
 import CatalogueHome from "./pages/CatalogueHome.jsx";
+import MovieDetails from "./pages/MovieDetails.jsx";
 
 import "./App.css";
 
@@ -60,10 +60,8 @@ function App() {
   const location = useLocation();
 
   /*
-   * Home sections appear after catalogue reference data loads.
-   *
-   * If navigation happens before they mount, observe the rendered
-   * content until the requested section becomes available.
+   * Scroll to home sections after asynchronous catalogue
+   * content has mounted.
    */
   useEffect(() => {
     if (location.pathname !== "/") {
@@ -106,9 +104,6 @@ function App() {
     return () => observer.disconnect();
   }, [location.pathname, location.hash]);
 
-  /*
-   * Shared navigation for the header, logo and return buttons.
-   */
   function navigateHome(event, sectionId = "home") {
     event?.preventDefault();
     setMenuOpen(false);
@@ -133,8 +128,8 @@ function App() {
   }
 
   /*
-   * Movie cards already pass the selected movie record.
-   * Details use a placeholder until the next batch.
+   * Movie cards pass their movie record.
+   * The details page loads fresh data using the route ID.
    */
   function openMovie(movie) {
     setMenuOpen(false);
@@ -179,13 +174,10 @@ function App() {
         <Route
           path="/movies/:movieId"
           element={
-            <FeaturePlaceholder
-              title="Movie details"
+            <MovieDetails
+              city={city}
               onBack={backToMovies}
-            >
-              Movie details and screening selection will
-              be added in the next batch.
-            </FeaturePlaceholder>
+            />
           }
         />
 
