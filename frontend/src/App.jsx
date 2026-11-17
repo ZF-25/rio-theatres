@@ -1,10 +1,13 @@
 /*
  * FILE: frontend/src/App.jsx
  *
- * Customer catalogue, movie details and screening discovery.
- * Authentication and booking are added in later batches.
+ * Includes:
+ * - Customer catalogue.
+ * - Movie details and screening discovery.
+ * - Customer registration, login and logout.
  *
- * main.jsx already supplies BrowserRouter.
+ * Booking and staff workspaces arrive in later batches.
+ * main.jsx already supplies BrowserRouter and AuthProvider.
  */
 
 import { useEffect, useState } from "react";
@@ -17,8 +20,15 @@ import {
 } from "react-router-dom";
 
 import CustomerLayout from "./layouts/CustomerLayout.jsx";
+
 import CatalogueHome from "./pages/CatalogueHome.jsx";
 import MovieDetails from "./pages/MovieDetails.jsx";
+import Login from "./pages/Login.jsx";
+import Register from "./pages/Register.jsx";
+
+import RequestState from "./components/RequestState.jsx";
+
+import { useAuth } from "./hooks/useAuth.js";
 
 import "./App.css";
 
@@ -55,13 +65,25 @@ function FeaturePlaceholder({
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [city, setCity] = useState("Oulu");
+  const [logoutError, setLogoutError] = useState(null);
 
   const navigate = useNavigate();
   const location = useLocation();
 
   /*
-   * Scroll to home sections after asynchronous catalogue
-   * content has mounted.
+   * Identity and authentication actions come from AuthProvider.
+   * App does not submit login credentials itself.
+   */
+  const {
+    user,
+    isCustomer,
+    isSessionLoading,
+    isSubmitting,
+    logout,
+  } = useAuth();
+
+  /*
+   * Scroll to home sections after catalogue content mounts.
    */
   useEffect(() => {
     if (location.pathname !== "/") {
@@ -127,10 +149,6 @@ function App() {
     }
   }
 
-  /*
-   * Movie cards pass their movie record.
-   * The details page loads fresh data using the route ID.
-   */
   function openMovie(movie) {
     setMenuOpen(false);
 
@@ -144,6 +162,45 @@ function App() {
     navigate("/login");
   }
 
+  function openRegister() {
+    setMenuOpen(false);
+    navigate("/register");
+  }
+
+  /*
+   * Login/Register already performed authentication.
+   * Their success callback only handles navigation here.
+   */
+  function handleAuthenticated() {
+    setLogoutError(null);
+    setMenuOpen(false);
+
+    navigate("/#movies", {
+      replace: true,
+    });
+  }
+
+  /*
+   * Only navigate after logout succeeds.
+   * A failure remains visible and can be retried.
+   */
+  async function handleLogout() {
+    if (isSubmitting || isSessionLoading) return;
+
+    setMenuOpen(false);
+    setLogoutError(null);
+
+    try {
+      await logout();
+
+      navigate("/", {
+        replace: true,
+      });
+    } catch (error) {
+      setLogoutError(error);
+    }
+  }
+
   const backToMovies = () =>
     navigateHome(undefined, "movies");
 
@@ -153,11 +210,28 @@ function App() {
       headerProps={{
         menuOpen,
         setMenuOpen,
-        user: null,
+
+        // Show customer controls only for a customer identity.
+        user: isCustomer ? user : null,
+
         navigateHome,
         openLogin,
+        handleLogout,
+
+        openBookingHistory: () => {
+          navigate("/my-bookings");
+        },
       }}
     >
+      {logoutError && (
+        <div className="container">
+          <RequestState
+            error={logoutError}
+            onRetry={handleLogout}
+          />
+        </div>
+      )}
+
       <Routes>
         <Route
           path="/"
@@ -184,12 +258,46 @@ function App() {
         <Route
           path="/login"
           element={
+            <Login
+              onLogin={handleAuthenticated}
+              onRegister={openRegister}
+              onStaffLogin={() => {
+                navigate("/staff/login");
+              }}
+            />
+          }
+        />
+
+        <Route
+          path="/register"
+          element={
+            <Register
+              onRegister={handleAuthenticated}
+              onLogin={openLogin}
+            />
+          }
+        />
+
+        <Route
+          path="/staff/login"
+          element={
             <FeaturePlaceholder
-              title="Customer login"
+              title="Staff login"
               onBack={backToMovies}
             >
-              Login and registration will be added in
-              the authentication batch.
+              The staff workspace will be added in a later batch.
+            </FeaturePlaceholder>
+          }
+        />
+
+        <Route
+          path="/my-bookings"
+          element={
+            <FeaturePlaceholder
+              title="My bookings"
+              onBack={backToMovies}
+            >
+              Booking history will be added with the booking flow.
             </FeaturePlaceholder>
           }
         />
@@ -201,8 +309,7 @@ function App() {
               title="Page unavailable"
               onBack={backToMovies}
             >
-              This page has not been added to the new
-              frontend yet.
+              This page has not been added to the new frontend yet.
             </FeaturePlaceholder>
           }
         />
