@@ -1,55 +1,21 @@
 /*
  * FILE: frontend/src/components/RequestState.jsx
  *
- * PURPOSE
- * -------
- * Displays shared feedback for asynchronous data requests:
+ * Displays loading and error messages during API requests.
+ * Also shows a retry button if the request fails.
  *
- * - Loading message while a request is running.
- * - Error message when a request fails.
- * - Optional button to retry the request.
- *
- * PAGE CONNECTIONS
- * ----------------
- * Home:
- * - Loading cinema/genre options.
- * - Loading movie search results.
- *
- * Movie Details:
- * - Loading movie information.
- * - Loading rooms and screening times.
- *
- * This component does not fetch data itself.
- * It receives request state from useResource().
- *
- * Successful results and empty lists are displayed by the page,
- * not by this component.
+ * Used by Home and Movie Details to handle request states.
+ * Receives request information from the parent through useResource().
+ * This component does not fetch data or display successful results.
  */
-
 
 /*
  * PROPS
  *
- * loading:
- * Whether the current request is unfinished.
- *
- * error:
- * An Error or ApiError from the request, or null.
- *
- * onRetry:
- * Optional function called when the retry button is pressed.
- *
- * loadingMessage:
- * Optional page-specific loading text.
- *
- * Example:
- *
- * <RequestState
- *   loading={moviesResult.loading}
- *   error={moviesResult.error}
- *   onRetry={moviesResult.retry}
- *   loadingMessage="Loading movies…"
- * />
+ * loading: True while the request is running.
+ * error: Contains the request error, or null if there is none.
+ * onRetry: Optional function to retry a failed request.
+ * loadingMessage: Custom loading text, defaults to "Loading…".
  */
 function RequestState({
   loading = false,
@@ -58,10 +24,11 @@ function RequestState({
   loadingMessage = "Loading…",
 }) {
   /*
-   * LOADING
+   * LOADING STATE
    *
-   * role="status" lets assistive technology announce the update
-   * without moving the user's keyboard focus.
+   * Displays a loading message while the request is running.
+   * role="status" lets screen readers announce the message
+   * without changing the user's keyboard focus.
    */
   if (loading) {
     return (
@@ -76,9 +43,10 @@ function RequestState({
 
 
   /*
-   * SUCCESS / NOTHING TO DISPLAY
+   * SUCCESS STATE
    *
-   * The parent page handles successful data and empty results.
+   * Returns nothing if there is no error and loading is finished.
+   * The parent page handles successful data or empty results.
    */
   if (!error) {
     return null;
@@ -86,13 +54,11 @@ function RequestState({
 
 
   /*
-   * ERROR
+   * ERROR HANDLING
    *
-   * Prefer the readable message supplied by the API client.
-   * Provide a fallback if the error has no usable message.
-   *
-   * React renders this as text. Do not use dangerouslySetInnerHTML
-   * to display backend error messages.
+   * Checks if the error contains a valid, non-empty message.
+   * Otherwise, displays a default error message.
+   * React renders the message as text rather than HTML for safety.
    */
   const message =
     typeof error.message === "string" &&
@@ -100,15 +66,24 @@ function RequestState({
       ? error.message
       : "Unable to load this information. Please try again.";
 
+  // Checks if the parent provided a retry function.
+  // The retry button only appears when this function exists.
   const canRetry =
     typeof onRetry === "function";
 
+  /*
+   * ERROR DISPLAY
+   *
+   * Shows the error message and an optional retry button.
+   * role="alert" lets screen readers announce the error.
+   */
   return (
     <div className="request-error">
       <p role="alert">
         {message}
       </p>
 
+      {/* Displays the retry button only when retry is available. */}
       {canRetry && (
         <button
           type="button"
@@ -122,4 +97,5 @@ function RequestState({
   );
 }
 
+// Exports the component so other pages can use it.
 export default RequestState;

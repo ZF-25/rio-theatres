@@ -1,53 +1,79 @@
 /*
  * FILE: frontend/src/utils/userName.js
  *
- * PURPOSE
- * -------
- * Builds a display name from an account's firstName and lastName.
+ * Provides a helper function for displaying user names
+ * throughout the Rio Theaters application.
  *
- * USED BY
- * -------
- * Customer login and registration pages, staff login,
- * dashboards, and cashier account lists.
+ * Used by:
+ * - Customer login and registration pages.
+ * - Staff login pages.
+ * - Customer and staff dashboards.
+ * - Cashier account lists.
  *
- * API ACCOUNT FIELDS
- * ------------------
+ * The API stores firstName and lastName separately.
+ *
+ * Example account:
  * {
  *   firstName: "John",
  *   lastName: "Smith",
  *   email: "john@example.com"
  * }
  *
- * IMPORTANT
- * ---------
- * This helper is for display only.
+ * This file combines the names for display purposes only.
  *
- * Registration and cashier creation must collect firstName
- * and lastName separately and send them separately.
+ * IMPORTANT:
+ * Registration and account creation must still collect
+ * and send firstName and lastName as separate values.
  *
- * Do not split a full name automatically: names can contain
- * multiple words, so splitting on spaces can give incorrect results.
+ * Names should not be automatically split using spaces
+ * because some names contain multiple words.
  */
 
+
 /*
- * Safely trim a display value.
- * Missing or unexpected values become an empty string.
+ * CLEAN TEXT
+ *
+ * Removes unnecessary spaces from the beginning
+ * and end of a string using trim().
+ *
+ * If the value is missing or is not a string,
+ * an empty string is returned instead.
+ *
+ * Examples:
+ * cleanText("  John  ") returns "John".
+ * cleanText(null) returns "".
+ * cleanText(123) returns "".
+ *
+ * This prevents unexpected values from appearing
+ * in the user's display name.
  */
 function cleanText(value) {
   return typeof value === "string" ? value.trim() : "";
 }
 
+
 /*
- * Return the account's display name.
+ * GET USER DISPLAY NAME
  *
- * Priority:
- * 1. firstName + lastName
- * 2. Legacy name, while we update existing demo accounts
- * 3. Email
- * 4. Caller-provided fallback
+ * Creates a readable name for a user account.
  *
- * The legacy fallback allows us to migrate files one at a time.
- * It does not add a name field to outgoing API requests.
+ * Parameters:
+ * user: Object containing the user's account information.
+ * fallback: Text displayed when no name or email is available.
+ *
+ * The default fallback is "User".
+ *
+ * DISPLAY PRIORITY:
+ * 1. First name and last name.
+ * 2. Older demo account's name field.
+ * 3. Email address.
+ * 4. Provided fallback text.
+ *
+ * The legacy name field supports older demo accounts
+ * while the application is being updated.
+ *
+ * This function only returns display text.
+ * It does not change the account or send data to the API.
  *
  * Examples:
  *
@@ -55,37 +81,85 @@ function cleanText(value) {
  *   firstName: "John",
  *   lastName: "Smith",
  * });
- * // "John Smith"
+ * Returns: "John Smith"
  *
  * getUserDisplayName(null);
- * // "User"
+ * Returns: "User"
  *
  * getUserDisplayName(null, "Staff member");
- * // "Staff member"
+ * Returns: "Staff member"
  */
 export function getUserDisplayName(user, fallback = "User") {
+  /*
+   * GET FIRST AND LAST NAME
+   *
+   * Optional chaining (?.) safely accesses account properties
+   * even when the user object is null or undefined.
+   *
+   * cleanText() removes extra surrounding spaces
+   * and handles missing or invalid values.
+   */
   const firstName = cleanText(user?.firstName);
   const lastName = cleanText(user?.lastName);
 
+  /*
+   * BUILD FULL NAME
+   *
+   * Creates an array containing the first and last names.
+   *
+   * filter(Boolean) removes empty strings.
+   *
+   * join(" ") combines the remaining names
+   * with a space between them.
+   *
+   * Examples:
+   * ["John", "Smith"] becomes "John Smith".
+   * ["John", ""] becomes "John".
+   * ["", "Smith"] becomes "Smith".
+   */
   const fullName = [firstName, lastName]
     .filter(Boolean)
     .join(" ");
 
+  // Uses the full name when at least one name is available.
   if (fullName) {
     return fullName;
   }
 
+  /*
+   * CHECK LEGACY NAME
+   *
+   * Older demo accounts may store the user's full name
+   * in a single property called name.
+   *
+   * This fallback keeps those accounts working
+   * while the application moves to separate name fields.
+   */
   const legacyName = cleanText(user?.name);
 
   if (legacyName) {
     return legacyName;
   }
 
+  /*
+   * CHECK EMAIL ADDRESS
+   *
+   * If no first name, last name, or legacy name exists,
+   * the email address is used as the display name.
+   */
   const email = cleanText(user?.email);
 
   if (email) {
     return email;
   }
 
+  /*
+   * RETURN FALLBACK
+   *
+   * Uses the caller's fallback text if it is valid.
+   *
+   * If the fallback is empty or invalid,
+   * "User" is returned as the final default.
+   */
   return cleanText(fallback) || "User";
 }

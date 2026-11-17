@@ -1,16 +1,14 @@
 /*
  * FILE: frontend/src/App.jsx
  *
- * Shared layout and navigation shell.
+ * BATCH 2
+ * Working homepage and movie catalogue.
  *
- * main.jsx already provides BrowserRouter.
- * Do not add another BrowserRouter here.
- *
- * These placeholders will be replaced by real pages later.
- * This shell does not authenticate users or connect to backend APIs.
+ * Movie details, authentication and booking are added later.
+ * main.jsx already supplies BrowserRouter.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import {
   Route,
@@ -20,63 +18,18 @@ import {
 } from "react-router-dom";
 
 import CustomerLayout from "./layouts/CustomerLayout.jsx";
+import CatalogueHome from "./pages/CatalogueHome.jsx";
 
 import "./App.css";
 
-/*
- * Temporary home sections keep the header navigation functional
- * while the customer pages are added.
- */
-const sections = [
-  {
-    id: "movies",
-    title: "Movies",
-    text: "Movie browsing and screening information will be added in the catalogue batch.",
-  },
-  {
-    id: "locations",
-    title: "Our theaters",
-    text: "Rio Theaters operates in Oulu and Tampere.",
-  },
-  {
-    id: "contact",
-    title: "Contact",
-    text: "Theater contact information will be added with the customer pages.",
-  },
-  {
-    id: "about",
-    title: "About Rio Theaters",
-    text: "A cinema booking application for customers, owners and cashiers.",
-  },
-];
+const homeSections = new Set([
+  "home",
+  "movies",
+  "locations",
+  "contact",
+  "about",
+]);
 
-function HomeShell() {
-  return (
-    <div className="container">
-      <section id="home" className="section">
-        <p className="eyebrow">RIO THEATERS</p>
-
-        <h1>Welcome to Rio Theaters</h1>
-
-        <p>
-          Shared layout and navigation preview. Feature pages
-          are being added in separate commits.
-        </p>
-      </section>
-
-      {sections.map(({ id, title, text }) => (
-        <section key={id} id={id} className="section">
-          <h2>{title}</h2>
-          <p>{text}</p>
-        </section>
-      ))}
-    </div>
-  );
-}
-
-/*
- * Reusable temporary content for routes not implemented.
- */
 function FeaturePlaceholder({
   title,
   children,
@@ -93,7 +46,7 @@ function FeaturePlaceholder({
         className="secondary-button"
         onClick={onBack}
       >
-        Back to home
+        Back to movies
       </button>
     </section>
   );
@@ -101,41 +54,94 @@ function FeaturePlaceholder({
 
 function App() {
   const [menuOpen, setMenuOpen] = useState(false);
+  const [city, setCity] = useState("Oulu");
 
   const navigate = useNavigate();
   const location = useLocation();
 
   /*
-   * Used by the logo, home-section navigation and Back buttons.
+   * Home sections appear after catalogue reference data loads.
+   *
+   * If navigation happens before they mount, observe the rendered
+   * content until the requested section becomes available.
    */
-  function goHome(event, sectionId = "home") {
-    event?.preventDefault();
-    setMenuOpen(false);
-
-    if (location.pathname === "/") {
-      navigate({
-        pathname: "/",
-        hash: `#${sectionId}`,
-      });
-
-      document.getElementById(sectionId)?.scrollIntoView({
-        behavior: "smooth",
-      });
-
+  useEffect(() => {
+    if (location.pathname !== "/") {
+      window.scrollTo({ top: 0 });
       return;
     }
 
-    navigate({
-      pathname: "/",
-      hash: `#${sectionId}`,
-    });
+    const sectionId = location.hash.slice(1);
 
-    // Wait for the home sections to mount after navigation.
-    requestAnimationFrame(() => {
-      document.getElementById(sectionId)?.scrollIntoView({
+    if (!homeSections.has(sectionId)) return;
+
+    function scrollIfReady() {
+      const section = document.getElementById(sectionId);
+
+      if (!section) return false;
+
+      section.scrollIntoView({
         behavior: "smooth",
       });
+
+      return true;
+    }
+
+    if (scrollIfReady()) return;
+
+    const observer = new MutationObserver(() => {
+      if (scrollIfReady()) {
+        observer.disconnect();
+      }
     });
+
+    observer.observe(
+      document.getElementById("root"),
+      {
+        childList: true,
+        subtree: true,
+      },
+    );
+
+    return () => observer.disconnect();
+  }, [location.pathname, location.hash]);
+
+  /*
+   * Shared navigation for the header, logo and return buttons.
+   */
+  function navigateHome(event, sectionId = "home") {
+    event?.preventDefault();
+    setMenuOpen(false);
+
+    const target = homeSections.has(sectionId)
+      ? sectionId
+      : "home";
+
+    if (
+      location.pathname === "/" &&
+      location.hash === `#${target}`
+    ) {
+      document.getElementById(target)?.scrollIntoView({
+        behavior: "smooth",
+      });
+    } else {
+      navigate({
+        pathname: "/",
+        hash: `#${target}`,
+      });
+    }
+  }
+
+  /*
+   * Movie cards already pass the selected movie record.
+   * Details use a placeholder until the next batch.
+   */
+  function openMovie(movie) {
+    setMenuOpen(false);
+
+    navigate(
+      `/movies/${encodeURIComponent(movie.id)}`,
+    );
   }
 
   function openLogin() {
@@ -143,26 +149,44 @@ function App() {
     navigate("/login");
   }
 
-  const backHome = () => goHome();
+  const backToMovies = () =>
+    navigateHome(undefined, "movies");
 
   return (
     <CustomerLayout
-      onLogoClick={(event) => goHome(event)}
+      onLogoClick={(event) => navigateHome(event)}
       headerProps={{
         menuOpen,
         setMenuOpen,
-
-        // No authentication is connected.
         user: null,
-
-        navigateHome: goHome,
+        navigateHome,
         openLogin,
       }}
     >
       <Routes>
         <Route
           path="/"
-          element={<HomeShell />}
+          element={
+            <CatalogueHome
+              city={city}
+              onCityChange={setCity}
+              navigateHome={navigateHome}
+              openMovie={openMovie}
+            />
+          }
+        />
+
+        <Route
+          path="/movies/:movieId"
+          element={
+            <FeaturePlaceholder
+              title="Movie details"
+              onBack={backToMovies}
+            >
+              Movie details and screening selection will
+              be added in the next batch.
+            </FeaturePlaceholder>
+          }
         />
 
         <Route
@@ -170,9 +194,9 @@ function App() {
           element={
             <FeaturePlaceholder
               title="Customer login"
-              onBack={backHome}
+              onBack={backToMovies}
             >
-              Login and registration will be connected in
+              Login and registration will be added in
               the authentication batch.
             </FeaturePlaceholder>
           }
@@ -183,7 +207,7 @@ function App() {
           element={
             <FeaturePlaceholder
               title="Page unavailable"
-              onBack={backHome}
+              onBack={backToMovies}
             >
               This page has not been added to the new
               frontend yet.
