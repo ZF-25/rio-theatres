@@ -1,7 +1,7 @@
 /*
  * FILE: frontend/src/App.jsx
- * Catalogue, customer authentication and staff account management.
- * Staff routes use their own navigation. Unfinished owner tabs show previews.
+ * Customer booking, staff accounts, owner overview and screening management.
+ * Staff routes use their own navigation; remaining staff features show previews.
  * main.jsx already provides BrowserRouter.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -29,6 +29,8 @@ import { useStaffSession } from "./hooks/useStaffSession.js";
 import { getUserDisplayName } from "./utils/userName.js";
 import RequestState from "./components/RequestState.jsx";
 import AdminCashiers from "./components/AdminCashiers.jsx";
+import AdminOverview from "./components/AdminOverview.jsx";
+import AdminScreenings from "./components/AdminScreenings.jsx";
 import { useAuth } from "./hooks/useAuth.js";
 import "./App.css";
 
@@ -59,8 +61,8 @@ function FeaturePlaceholder({ title, children, onBack }) {
   );
 }
 
-/* These previews use route guards, not real backend authorization. */
-function StaffWorkspace({ role, session, onLogout, tab = "cashiers" }) {
+/* Route guards control the interface; backend authorization is still required. */
+function StaffWorkspace({ role, session, onLogout, tab = "overview", onTabChange }) {
   if (session.isSessionLoading) {
     return <RequestState loading loadingMessage="Checking staff access…" />;
   }
@@ -77,12 +79,16 @@ function StaffWorkspace({ role, session, onLogout, tab = "cashiers" }) {
   }
   return (
     <section className="container section">
-      <p className="eyebrow">STAFF WORKSPACE PREVIEW</p>
+      <p className="eyebrow">RIO THEATERS STAFF</p>
       <h1>{role === "owner" ? "Owner workspace" : "Cashier workspace"}</h1>
       <p>Signed in as {getUserDisplayName(session.staff)}.</p>
       {role === "owner" ? (
         <>
-          {tab === "cashiers" ? (
+          {tab === "overview" ? (
+            <AdminOverview onTabChange={onTabChange} />
+          ) : tab === "screenings" ? (
+            <AdminScreenings />
+          ) : tab === "cashiers" ? (
             <>
               <p>
                 Manage cashier accounts and their single-theater access below.
@@ -93,8 +99,8 @@ function StaffWorkspace({ role, session, onLogout, tab = "cashiers" }) {
             <section>
               <h2>{Object.hasOwn(ownerTabs, tab) ? ownerTabs[tab] : "Page unavailable"}</h2>
               <p>
-                This owner feature will be added in a later batch. Use Cashiers
-                to manage staff accounts.
+                This owner feature will be added in a later batch. Overview,
+                Screenings and Cashiers are available now.
               </p>
             </section>
           )}
@@ -368,7 +374,7 @@ function App() {
   const cashierOpen =
     location.pathname === "/cashier" ||
     location.pathname.startsWith("/cashier/");
-  const adminTab = location.pathname.split("/")[2] || "cashiers";
+  const adminTab = location.pathname.split("/")[2] || "overview";
   const Layout = ownerOpen ? AdminLayout : CustomerLayout;
 
   function changeAdminTab(tab) {
@@ -379,7 +385,7 @@ function App() {
   function handleLogoClick(event) {
     if (ownerOpen || cashierOpen) {
       event?.preventDefault();
-      void navigateSafely(() => go(ownerOpen ? "/admin/cashiers" : "/cashier"));
+      void navigateSafely(() => go(ownerOpen ? "/admin/overview" : "/cashier"));
     } else {
       navigateHome(event);
     }
@@ -494,6 +500,7 @@ function App() {
           element={
             <StaffWorkspace
               role="owner"
+              onTabChange={changeAdminTab}
               session={staffSession}
               onLogout={handleStaffLogout}
             />
@@ -504,6 +511,7 @@ function App() {
           element={
             <StaffWorkspace
               role="owner"
+              onTabChange={changeAdminTab}
               session={staffSession}
               onLogout={handleStaffLogout}
               tab={adminTab}
