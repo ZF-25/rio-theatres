@@ -1,15 +1,10 @@
 /*
  * FILE: frontend/src/App.jsx
- *
- * Includes customer catalogue/authentication and staff login.
- * Owner/cashier workspaces are previews in this batch.
- *
- * Route guards control the interface only.
- * Backend authorization remains necessary after integration.
+ * Catalogue, customer authentication and staff account management.
+ * Staff routes use their own navigation. Unfinished owner tabs show previews.
+ * main.jsx already provides BrowserRouter.
  */
-
 import { useEffect, useState } from "react";
-
 import {
   Navigate,
   Route,
@@ -17,21 +12,18 @@ import {
   useLocation,
   useNavigate,
 } from "react-router-dom";
-
 import CustomerLayout from "./layouts/CustomerLayout.jsx";
-
+import AdminLayout from "./layouts/AdminLayout.jsx";
 import CatalogueHome from "./pages/CatalogueHome.jsx";
 import MovieDetails from "./pages/MovieDetails.jsx";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
 import StaffLogin from "./pages/StaffLogin.jsx";
-
-import RequestState from "./components/RequestState.jsx";
-
-import { useAuth } from "./hooks/useAuth.js";
 import { useStaffSession } from "./hooks/useStaffSession.js";
 import { getUserDisplayName } from "./utils/userName.js";
-
+import RequestState from "./components/RequestState.jsx";
+import AdminCashiers from "./components/AdminCashiers.jsx";
+import { useAuth } from "./hooks/useAuth.js";
 import "./App.css";
 
 const homeSections = new Set([
@@ -41,48 +33,31 @@ const homeSections = new Set([
   "contact",
   "about",
 ]);
+const ownerTabs = {
+  overview: "Overview",
+  screenings: "Screenings",
+  bookings: "Bookings",
+  seats: "Seats",
+  cashiers: "Cashiers",
+};
 
-function FeaturePlaceholder({
-  title,
-  children,
-  onBack,
-}) {
+function FeaturePlaceholder({ title, children, onBack }) {
   return (
     <section className="container section">
       <h1>{title}</h1>
       <p>{children}</p>
-
-      <button
-        type="button"
-        className="secondary-button"
-        onClick={onBack}
-      >
+      <button type="button" className="secondary-button" onClick={onBack}>
         Back to movies
       </button>
     </section>
   );
 }
 
-/*
- * Temporary protected workspace.
- *
- * A cashier cannot open the owner preview, and an anonymous
- * visitor is returned to staff login.
- */
-function StaffWorkspace({
-  role,
-  session,
-  onLogout,
-}) {
+/* These previews use route guards, not real backend authorization. */
+function StaffWorkspace({ role, session, onLogout, tab = "cashiers" }) {
   if (session.isSessionLoading) {
-    return (
-      <RequestState
-        loading
-        loadingMessage="Checking staff access…"
-      />
-    );
+    return <RequestState loading loadingMessage="Checking staff access…" />;
   }
-
   if (session.status === "error") {
     return (
       <RequestState
@@ -91,44 +66,46 @@ function StaffWorkspace({
       />
     );
   }
-
-  if (
-    !session.enabled ||
-    session.staff?.role !== role
-  ) {
+  if (!session.enabled || session.staff?.role !== role) {
     return <Navigate to="/staff/login" replace />;
   }
-
   return (
     <section className="container section">
-      <p className="eyebrow">
-        STAFF WORKSPACE PREVIEW
-      </p>
-
-      <h1>
-        {role === "owner"
-          ? "Owner workspace"
-          : "Cashier workspace"}
-      </h1>
-
-      <p>
-        Signed in as {getUserDisplayName(session.staff)}.
-      </p>
-
-      <p>
-        Staff login is available. Workspace management features
-        will be added in later commits.
-      </p>
-
+      <p className="eyebrow">STAFF WORKSPACE PREVIEW</p>
+      <h1>{role === "owner" ? "Owner workspace" : "Cashier workspace"}</h1>
+      <p>Signed in as {getUserDisplayName(session.staff)}.</p>
+      {role === "owner" ? (
+        <>
+          {tab === "cashiers" ? (
+            <>
+              <p>
+                Manage cashier accounts and their single-theater access below.
+              </p>
+              <AdminCashiers />
+            </>
+          ) : (
+            <section>
+              <h2>{ownerTabs[tab] ?? "Page unavailable"}</h2>
+              <p>
+                This owner feature will be added in a later batch. Use Cashiers
+                to manage staff accounts.
+              </p>
+            </section>
+          )}
+        </>
+      ) : (
+        <p>
+          Cashier login is available. The reservation workspace will be added in
+          a later batch.
+        </p>
+      )}
       <button
         type="button"
         className="secondary-button"
         onClick={onLogout}
         disabled={session.isSubmitting}
       >
-        {session.isSubmitting
-          ? "Signing out…"
-          : "Log out of staff account"}
+        {session.isSubmitting ? "Signing out…" : "Log out of staff account"}
       </button>
     </section>
   );
@@ -138,91 +115,54 @@ function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [city, setCity] = useState("Oulu");
   const [logoutError, setLogoutError] = useState(null);
-
+  const { user, isCustomer, isSessionLoading, isSubmitting, logout } =
+    useAuth();
+  const staffSession = useStaffSession();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const {
-    user,
-    isCustomer,
-    isSessionLoading,
-    isSubmitting,
-    logout,
-  } = useAuth();
-
-  const staffSession = useStaffSession();
-
-  // Restore section scrolling after catalogue content loads.
+  /* Catalogue sections mount after asynchronous reference data loads.
+   * Observe that mount so navigation from another route can still scroll.
+   */
   useEffect(() => {
     if (location.pathname !== "/") {
       window.scrollTo({ top: 0 });
       return;
     }
-
     const sectionId = location.hash.slice(1);
-
     if (!homeSections.has(sectionId)) return;
 
     function scrollIfReady() {
       const section = document.getElementById(sectionId);
-
       if (!section) return false;
-
-      section.scrollIntoView({
-        behavior: "smooth",
-      });
-
+      section.scrollIntoView({ behavior: "smooth" });
       return true;
     }
-
     if (scrollIfReady()) return;
-
     const observer = new MutationObserver(() => {
-      if (scrollIfReady()) {
-        observer.disconnect();
-      }
+      if (scrollIfReady()) observer.disconnect();
     });
-
-    observer.observe(
-      document.getElementById("root"),
-      {
-        childList: true,
-        subtree: true,
-      },
-    );
-
+    observer.observe(document.getElementById("root"), {
+      childList: true,
+      subtree: true,
+    });
     return () => observer.disconnect();
   }, [location.pathname, location.hash]);
 
   function navigateHome(event, sectionId = "home") {
     event?.preventDefault();
     setMenuOpen(false);
-
-    const target = homeSections.has(sectionId)
-      ? sectionId
-      : "home";
-
-    if (
-      location.pathname === "/" &&
-      location.hash === `#${target}`
-    ) {
-      document.getElementById(target)?.scrollIntoView({
-        behavior: "smooth",
-      });
+    const target = homeSections.has(sectionId) ? sectionId : "home";
+    if (location.pathname === "/" && location.hash === `#${target}`) {
+      document.getElementById(target)?.scrollIntoView({ behavior: "smooth" });
     } else {
-      navigate({
-        pathname: "/",
-        hash: `#${target}`,
-      });
+      navigate({ pathname: "/", hash: `#${target}` });
     }
   }
 
   function openMovie(movie) {
     setMenuOpen(false);
-
-    navigate(
-      `/movies/${encodeURIComponent(movie.id)}`,
-    );
+    navigate(`/movies/${encodeURIComponent(movie.id)}`);
   }
 
   function openLogin() {
@@ -235,22 +175,17 @@ function App() {
     navigate("/register");
   }
 
-  // Authentication is already performed by Login/Register.
+  // Login/Register already perform authentication. Only navigate here.
   function handleAuthenticated() {
     setLogoutError(null);
     setMenuOpen(false);
-
-    navigate("/#movies", {
-      replace: true,
-    });
+    navigate("/#movies", { replace: true });
   }
 
   async function handleLogout() {
     if (isSubmitting || isSessionLoading) return;
-
     setMenuOpen(false);
     setLogoutError(null);
-
     try {
       await logout();
       navigate("/", { replace: true });
@@ -259,66 +194,71 @@ function App() {
     }
   }
 
-  /*
-   * StaffLogin authenticates once and passes its staff profile.
-   * Open the workspace belonging to the returned role.
-   */
   function handleStaffAuthenticated(account) {
-    if (
-      !["owner", "cashier"].includes(account?.role)
-    ) {
-      throw new Error(
-        "An owner or cashier account is required.",
-      );
+    if (!["owner", "cashier"].includes(account?.role)) {
+      throw new Error("An owner or cashier account is required.");
     }
-
     setMenuOpen(false);
     setLogoutError(null);
-
-    navigate(
-      account.role === "owner"
-        ? "/admin"
-        : "/cashier",
-      { replace: true },
-    );
+    navigate(account.role === "owner" ? "/admin" : "/cashier", {
+      replace: true,
+    });
   }
 
   async function handleStaffLogout() {
     if (staffSession.isSubmitting) return;
-
     setLogoutError(null);
-
+    setMenuOpen(false);
     try {
       await staffSession.logout();
-
-      navigate("/staff/login", {
-        replace: true,
-      });
+      navigate("/staff/login", { replace: true });
     } catch (error) {
       setLogoutError(error);
     }
   }
 
-  const backToMovies = () =>
-    navigateHome(undefined, "movies");
+  const backToMovies = () => navigateHome(undefined, "movies");
+  const ownerOpen =
+    location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+  const cashierOpen =
+    location.pathname === "/cashier" ||
+    location.pathname.startsWith("/cashier/");
+  const adminTab = location.pathname.split("/")[2] || "cashiers";
+  const Layout = ownerOpen ? AdminLayout : CustomerLayout;
 
-  const viewingStaffWorkspace =
-    location.pathname.startsWith("/admin") ||
-    location.pathname.startsWith("/cashier");
+  function changeAdminTab(tab) {
+    if (!Object.hasOwn(ownerTabs, tab)) return;
+    setMenuOpen(false);
+    navigate(`/admin/${tab}`);
+  }
+
+  function handleLogoClick(event) {
+    if (ownerOpen || cashierOpen) {
+      event?.preventDefault();
+      setMenuOpen(false);
+      navigate(ownerOpen ? "/admin/cashiers" : "/cashier");
+    } else {
+      navigateHome(event);
+    }
+  }
 
   return (
-    <CustomerLayout
-      onLogoClick={(event) => navigateHome(event)}
+    <Layout
+      onLogoClick={handleLogoClick}
       headerProps={{
         menuOpen,
         setMenuOpen,
+        adminOpen: ownerOpen,
+        cashierOpen,
+        currentStaff: staffSession.staff,
+        adminTab,
+        changeAdminTab,
+        onStaffLogout: handleStaffLogout,
         user: isCustomer ? user : null,
         navigateHome,
         openLogin,
         handleLogout,
-        openBookingHistory: () => {
-          navigate("/my-bookings");
-        },
+        openBookingHistory: () => navigate("/my-bookings"),
       }}
     >
       {logoutError && (
@@ -326,14 +266,14 @@ function App() {
           <RequestState
             error={logoutError}
             onRetry={
-              viewingStaffWorkspace
+              location.pathname.startsWith("/admin") ||
+              location.pathname.startsWith("/cashier")
                 ? handleStaffLogout
                 : handleLogout
             }
           />
         </div>
       )}
-
       <Routes>
         <Route
           path="/"
@@ -346,40 +286,26 @@ function App() {
             />
           }
         />
-
         <Route
           path="/movies/:movieId"
-          element={
-            <MovieDetails
-              city={city}
-              onBack={backToMovies}
-            />
-          }
+          element={<MovieDetails city={city} onBack={backToMovies} />}
         />
-
         <Route
           path="/login"
           element={
             <Login
               onLogin={handleAuthenticated}
               onRegister={openRegister}
-              onStaffLogin={() => {
-                navigate("/staff/login");
-              }}
+              onStaffLogin={() => navigate("/staff/login")}
             />
           }
         />
-
         <Route
           path="/register"
           element={
-            <Register
-              onRegister={handleAuthenticated}
-              onLogin={openLogin}
-            />
+            <Register onRegister={handleAuthenticated} onLogin={openLogin} />
           }
         />
-
         <Route
           path="/staff/login"
           element={
@@ -389,7 +315,6 @@ function App() {
             />
           }
         />
-
         <Route
           path="/admin"
           element={
@@ -400,7 +325,17 @@ function App() {
             />
           }
         />
-
+        <Route
+          path="/admin/:tab"
+          element={
+            <StaffWorkspace
+              role="owner"
+              session={staffSession}
+              onLogout={handleStaffLogout}
+              tab={adminTab}
+            />
+          }
+        />
         <Route
           path="/cashier"
           element={
@@ -411,32 +346,24 @@ function App() {
             />
           }
         />
-
         <Route
           path="/my-bookings"
           element={
-            <FeaturePlaceholder
-              title="My bookings"
-              onBack={backToMovies}
-            >
+            <FeaturePlaceholder title="My bookings" onBack={backToMovies}>
               Booking history will be added with the booking flow.
             </FeaturePlaceholder>
           }
         />
-
         <Route
           path="*"
           element={
-            <FeaturePlaceholder
-              title="Page unavailable"
-              onBack={backToMovies}
-            >
+            <FeaturePlaceholder title="Page unavailable" onBack={backToMovies}>
               This page has not been added to the new frontend yet.
             </FeaturePlaceholder>
           }
         />
       </Routes>
-    </CustomerLayout>
+    </Layout>
   );
 }
 
