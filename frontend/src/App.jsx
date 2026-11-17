@@ -1,7 +1,7 @@
 /*
  * FILE: frontend/src/App.jsx
- * Customer booking, staff accounts, owner overview and screening management.
- * Staff routes use their own navigation; remaining staff features show previews.
+ * Customer booking, owner management and unpaid staff reservations.
+ * Staff routes use their own navigation and role guards.
  * main.jsx already provides BrowserRouter.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -31,6 +31,9 @@ import RequestState from "./components/RequestState.jsx";
 import AdminCashiers from "./components/AdminCashiers.jsx";
 import AdminOverview from "./components/AdminOverview.jsx";
 import AdminScreenings from "./components/AdminScreenings.jsx";
+import AdminBookings from "./components/AdminBookings.jsx";
+import AdminSeats from "./components/AdminSeats.jsx";
+import CashierDashboard from "./pages/CashierDashboard.jsx";
 import { useAuth } from "./hooks/useAuth.js";
 import "./App.css";
 
@@ -88,6 +91,10 @@ function StaffWorkspace({ role, session, onLogout, tab = "overview", onTabChange
             <AdminOverview onTabChange={onTabChange} />
           ) : tab === "screenings" ? (
             <AdminScreenings />
+          ) : tab === "bookings" ? (
+            <AdminBookings />
+          ) : tab === "seats" ? (
+            <AdminSeats />
           ) : tab === "cashiers" ? (
             <>
               <p>
@@ -99,17 +106,13 @@ function StaffWorkspace({ role, session, onLogout, tab = "overview", onTabChange
             <section>
               <h2>{Object.hasOwn(ownerTabs, tab) ? ownerTabs[tab] : "Page unavailable"}</h2>
               <p>
-                This owner feature will be added in a later batch. Overview,
-                Screenings and Cashiers are available now.
+                Choose an available owner page from the navigation.
               </p>
             </section>
           )}
         </>
       ) : (
-        <p>
-          Cashier login is available. The reservation workspace will be added in
-          a later batch.
-        </p>
+        <CashierDashboard />
       )}
       <button
         type="button"
