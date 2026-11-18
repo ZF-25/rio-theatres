@@ -382,6 +382,16 @@ function BookingConfirmation({
   if (bookingMode === "api" &&
       (receipt.bookingStatus !== "confirmed" || receipt.paymentStatus !== "paid")) {
     const pending = receipt.bookingStatus === "pending";
+    let resumeUrl = null;
+    if (pending && typeof receipt.checkoutUrl === "string") {
+      try {
+        const url = new URL(receipt.checkoutUrl);
+        if (url.protocol === "https:" && url.hostname === "checkout.stripe.com" &&
+            !url.username && !url.password) resumeUrl = url.href;
+      } catch {
+        // No payment link is displayed for malformed backend URLs.
+      }
+    }
     const returnedWithoutPayment = new URLSearchParams(location.search).get("checkout") === "cancelled";
     return (
       <section className="container section">
@@ -396,6 +406,9 @@ function BookingConfirmation({
               : "The backend has not confirmed payment yet. We will check for updates briefly; you can also refresh the status."
             : "This booking does not have a confirmed payment. No admission ticket is available."}
         </p>
+        {resumeUrl && (
+          <a className="primary-button" href={resumeUrl}>Continue payment on Stripe</a>
+        )}
         <button type="button" className="secondary-button" onClick={bookingResult.retry}
           disabled={bookingResult.loading}>Refresh payment status</button>
         <button type="button" className="secondary-button" onClick={onBackToMovies}>Back to movies</button>
