@@ -11,5 +11,6 @@ router.use('/screenings', require('./screenings'));
 router.use('/holds', require('./holds'));
 router.use('/bookings', require('./bookings'));
 router.use('/me', require('./me'));
+router.use('/staff/reservations', require('./staffReservations'));
 
 module.exports = router;
