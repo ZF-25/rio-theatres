@@ -12,7 +12,7 @@
  * - Supports guest checkout and customer login.
  * - Preserves booking contacts when navigating to login.
  * - Saves unfinished purchase operations for safe retries.
- * - Completes simulated payment through the booking service.
+ * - Simulates payment in demo mode or redirects to Stripe in API mode.
  *
  * ACCOUNT NAME UPDATE
  * -------------------
@@ -541,7 +541,35 @@ function CheckoutContent({
         return;
       }
 
-      await onBookingCreated(response.data);
+      const receipt = response.data;
+      if (bookingMode === "api" && receipt.bookingStatus === "pending") {
+        // A pending booking is not a ticket. Retain the operation checkpoint
+        // so a failed redirect can retry the same request without duplicating it.
+        let checkoutUrl;
+        try {
+          checkoutUrl = new URL(receipt.checkoutUrl);
+        } catch {
+          throw new ApiError("The payment checkout URL is missing or invalid.", {
+            code: "INVALID_RESPONSE",
+          });
+        }
+        if (checkoutUrl.protocol !== "https:" ||
+            checkoutUrl.hostname !== "checkout.stripe.com" ||
+            checkoutUrl.username || checkoutUrl.password) {
+          throw new ApiError("The payment checkout URL is unsupported.", {
+            code: "INVALID_RESPONSE",
+          });
+        }
+        window.location.assign(checkoutUrl.href);
+        return;
+      }
+      if (bookingMode === "api" &&
+          (receipt.bookingStatus !== "confirmed" || receipt.paymentStatus !== "paid")) {
+        throw new ApiError("Payment has not been confirmed. Check your booking status before trying again.", {
+          code: "INVALID_RESPONSE",
+        });
+      }
+      await onBookingCreated(receipt);
 
       clearCheckpoint(holdId);
       purchaseRef.current = null;
@@ -824,7 +852,9 @@ function CheckoutContent({
             </p>
 
             <div className="checkout-payment-notice">
-              Simulated payment only. No money will be charged.
+              {bookingMode === "demo"
+                ? "Simulated payment only. No money will be charged."
+                : "Continue to Stripe test checkout. Your booking is confirmed only after the backend verifies payment."}
             </div>
 
             {error && (
@@ -842,7 +872,7 @@ function CheckoutContent({
                 ? "Checking purchase…"
                 : recoveringPurchase
                   ? "Retry purchase result"
-                  : `Simulate payment · ${formatMoney(
+                  : `${bookingMode === "demo" ? "Simulate payment" : "Continue to Stripe"} · ${formatMoney(
                       quote.totalCents,
                       quote.currency,
                     )}`}

@@ -362,7 +362,7 @@ export function createApiBooking(client) {
 
 
     /*
-     * COMPLETE A SIMULATED PURCHASE
+     * START STRIPE CHECKOUT
      *
      * Endpoint:
      * POST /api/v1/bookings
@@ -373,8 +373,9 @@ export function createApiBooking(client) {
      *   customer: { name, email }
      * }
      *
-     * paymentMethod is fixed here because this project currently
-     * supports simulated payment only.
+     * API purchases use Stripe. Demo purchases use demoBooking.js.
+     * A successful POST may return a pending booking and checkoutUrl;
+     * it is not proof of payment. Only backend confirmation marks it paid.
      *
      * Success:
      * { data: Booking }
@@ -422,7 +423,7 @@ export function createApiBooking(client) {
                   : customer?.email,
             },
 
-            paymentMethod: "simulated",
+            paymentMethod: "stripe",
           },
         },
       );

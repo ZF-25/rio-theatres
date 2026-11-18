@@ -101,6 +101,8 @@ if (!["demo", "api"].includes(bookingMode)) {
  */
 export const bookingEnabled =
   bookingMode === dataMode &&
+  // Keep API checkout gated until Stripe pages and live tests are complete.
+  (bookingMode !== "api" || import.meta.env.VITE_API_CUSTOMER_BOOKING === "true") &&
   (bookingMode === "api" ? authMode === "api" : authMode === "demo");
 
 
