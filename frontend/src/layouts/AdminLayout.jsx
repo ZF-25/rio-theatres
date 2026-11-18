@@ -1,18 +1,17 @@
-// Reuse the existing layout structure instead of repeating
-// its header, main content area, skip link, and footer.
-import CustomerLayout from './CustomerLayout.jsx'
+import CustomerLayout from "./CustomerLayout";
 
-function AdminLayout() {
+function AdminLayout({ headerProps, onLogoClick, children }) {
   return (
-    // Select the administrator navigation.
-    //
-    // The Outlet inside CustomerLayout still displays the
-    // matching nested admin page from App.jsx.
-    <CustomerLayout variant="admin" />
-  )
+    <CustomerLayout
+      headerProps={{
+        ...headerProps,
+        adminOpen: true,
+      }}
+      onLogoClick={onLogoClick}
+    >
+      {children}
+    </CustomerLayout>
+  );
 }
 
-// This component controls the visual layout only.
-// Authentication and administrator permissions will be
-// implemented separately when we connect protected routes.
-export default AdminLayout
+export default AdminLayout;

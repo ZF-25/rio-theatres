@@ -1,162 +1,555 @@
-// Routes selects the route matching the current URL.
-// Route defines a URL and the component to display there.
-import { Route, Routes } from "react-router-dom";
-
-// Layouts provide the shared header, main content area, and footer.
+/*
+ * FILE: frontend/src/App.jsx
+ * Customer booking, owner management and unpaid staff reservations.
+ * Staff routes use their own navigation and role guards.
+ * main.jsx already provides BrowserRouter.
+ */
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  Navigate,
+  Route,
+  Routes,
+  useLocation,
+  useMatch,
+  useNavigate,
+} from "react-router-dom";
 import CustomerLayout from "./layouts/CustomerLayout.jsx";
 import AdminLayout from "./layouts/AdminLayout.jsx";
-
-// Existing setup pages remain available.
-import Home from "./pages/Home.jsx";
-import Setup from "./pages/Setup.jsx";
-import NotFound from "./pages/NotFound.jsx";
-
-// Reuse one placeholder component for unfinished features.
-import PlaceholderPage from "./pages/PlaceholderPage.jsx";
-
-// Import the shared application styles.
+import CatalogueHome from "./pages/CatalogueHome.jsx";
+import MovieDetails from "./pages/MovieDetails.jsx";
+import Login from "./pages/Login.jsx";
+import Register from "./pages/Register.jsx";
+import StaffLogin from "./pages/StaffLogin.jsx";
+import SeatSelection from "./pages/SeatSelection.jsx";
+import Checkout from "./pages/Checkout.jsx";
+import BookingConfirmation from "./pages/BookingConfirmation.jsx";
+import BookingHistory from "./pages/BookingHistory.jsx";
+import { booking as bookingService, bookingEnabled } from "./services/booking.js";
+import { useStaffSession } from "./hooks/useStaffSession.js";
+import { getUserDisplayName } from "./utils/userName.js";
+import RequestState from "./components/RequestState.jsx";
+import AdminCashiers from "./components/AdminCashiers.jsx";
+import AdminOverview from "./components/AdminOverview.jsx";
+import AdminScreenings from "./components/AdminScreenings.jsx";
+import AdminBookings from "./components/AdminBookings.jsx";
+import AdminSeats from "./components/AdminSeats.jsx";
+import CashierDashboard from "./pages/CashierDashboard.jsx";
+import { useAuth } from "./hooks/useAuth.js";
 import "./App.css";
 
-function App() {
+const homeSections = new Set([
+  "home",
+  "movies",
+  "locations",
+  "contact",
+  "about",
+]);
+const ownerTabs = {
+  overview: "Overview",
+  screenings: "Screenings",
+  bookings: "Bookings",
+  seats: "Seats",
+  cashiers: "Cashiers",
+};
+
+function FeaturePlaceholder({ title, children, onBack }) {
   return (
-    <Routes>
-      {/* Customer pages share the customer header and footer.
-          Each matching page renders inside the layout's Outlet. */}
-      <Route element={<CustomerLayout />}>
-        {/* An index route matches the parent's URL: "/". */}
-        <Route index element={<Home />} />
-
-        {/* Keep the setup page from Issue #1 accessible. */}
-        <Route path="setup" element={<Setup />} />
-
-        <Route
-          path="movies"
-          element={
-            <PlaceholderPage
-              title="Movies"
-              description="Explore movies showing at Rio Theaters."
-            />
-          }
-        />
-
-        <Route
-          path="locations"
-          element={
-            <PlaceholderPage
-              title="Our cinemas"
-              description="Find Rio Theaters in Oulu and Tampere."
-            />
-          }
-        />
-
-        <Route
-          path="contact"
-          element={
-            <PlaceholderPage
-              title="Contact us"
-              description="Get in touch with the Rio Theaters team."
-            />
-          }
-        />
-
-        <Route
-          path="about"
-          element={
-            <PlaceholderPage
-              title="About Rio Theaters"
-              description="Learn about our cinemas and the movie experience."
-            />
-          }
-        />
-
-        <Route
-          path="my-bookings"
-          element={
-            <PlaceholderPage
-              title="Your bookings"
-              description="Your ticket purchases will appear here once customer accounts and bookings are implemented."
-            />
-          }
-        />
-
-        <Route
-          path="login"
-          element={
-            <PlaceholderPage
-              title="Log in"
-              description="Customer login will be implemented in a later sprint."
-            />
-          }
-        />
-
-        {/* The wildcard displays a fallback for unknown customer URLs. */}
-        <Route path="*" element={<NotFound />} />
-      </Route>
-
-      {/* Admin pages use a separate navigation through AdminLayout.
-          Nested paths are added to "/admin".
-          For example, "screenings" becomes "/admin/screenings".
-          
-          These are public layout previews for Issue #2.
-          Authentication and authorization are not implemented yet. */}
-      <Route path="admin" element={<AdminLayout />}>
-        <Route
-          index
-          element={
-            <PlaceholderPage
-              title="Cinema overview"
-              description="Administrator dashboard layout preview."
-            />
-          }
-        />
-
-        <Route
-          path="screenings"
-          element={
-            <PlaceholderPage
-              title="Manage screenings"
-              description="Screening management will be implemented in a later sprint."
-            />
-          }
-        />
-
-        <Route
-          path="bookings"
-          element={
-            <PlaceholderPage
-              title="Manage bookings"
-              description="Booking management will be implemented in a later sprint."
-            />
-          }
-        />
-
-        <Route
-          path="seats"
-          element={
-            <PlaceholderPage
-              title="Seat availability"
-              description="Seat availability and reservation tools will be added later."
-            />
-          }
-        />
-
-        <Route
-          path="cashiers"
-          element={
-            <PlaceholderPage
-              title="Cashier accounts"
-              description="Owner account management tools will be added in a later sprint."
-            />
-          }
-        />
-
-        {/* Unknown admin URLs keep the administrator layout. */}
-        <Route path="*" element={<NotFound />} />
-      </Route>
-    </Routes>
+    <section className="container section">
+      <h1>{title}</h1>
+      <p>{children}</p>
+      <button type="button" className="secondary-button" onClick={onBack}>
+        Back to movies
+      </button>
+    </section>
   );
 }
 
-// main.jsx renders App inside BrowserRouter.
-// Do not add another BrowserRouter here.
+/* Route guards control the interface; backend authorization is still required. */
+function StaffWorkspace({ role, session, onLogout, tab = "overview", onTabChange }) {
+  if (session.isSessionLoading) {
+    return <RequestState loading loadingMessage="Checking staff access…" />;
+  }
+  if (session.status === "error") {
+    return (
+      <RequestState
+        error={session.sessionError}
+        onRetry={() => session.refreshSession()}
+      />
+    );
+  }
+  if (!session.enabled || session.staff?.role !== role) {
+    return <Navigate to="/staff/login" replace />;
+  }
+  return (
+    <section className="container section">
+      <p className="eyebrow">RIO THEATERS STAFF</p>
+      <h1>{role === "owner" ? "Owner workspace" : "Cashier workspace"}</h1>
+      <p>Signed in as {getUserDisplayName(session.staff)}.</p>
+      {role === "owner" ? (
+        <>
+          {tab === "overview" ? (
+            <AdminOverview onTabChange={onTabChange} />
+          ) : tab === "screenings" ? (
+            <AdminScreenings />
+          ) : tab === "bookings" ? (
+            <AdminBookings />
+          ) : tab === "seats" ? (
+            <AdminSeats />
+          ) : tab === "cashiers" ? (
+            <>
+              <p>
+                Manage cashier accounts and their single-theater access below.
+              </p>
+              <AdminCashiers />
+            </>
+          ) : (
+            <section>
+              <h2>{Object.hasOwn(ownerTabs, tab) ? ownerTabs[tab] : "Page unavailable"}</h2>
+              <p>
+                Choose an available owner page from the navigation.
+              </p>
+            </section>
+          )}
+        </>
+      ) : (
+        <CashierDashboard />
+      )}
+      <button
+        type="button"
+        className="secondary-button"
+        onClick={onLogout}
+        disabled={session.isSubmitting}
+      >
+        {session.isSubmitting ? "Signing out…" : "Log out of staff account"}
+      </button>
+    </section>
+  );
+}
+
+function App() {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [city, setCity] = useState("Oulu");
+  const [logoutError, setLogoutError] = useState(null);
+  const [navigationError, setNavigationError] = useState("");
+  const [checkoutDraft, setCheckoutDraft] = useState(null);
+  const checkoutNavigationLocked = useRef(false);
+  const [purchaseNavigationLocked, setPurchaseNavigationLocked] = useState(false);
+  const navigationInProgress = useRef(false);
+  const { user, isCustomer, isSessionLoading, isSubmitting, logout } =
+    useAuth();
+  const staffSession = useStaffSession();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const seatsMatch = useMatch("/screenings/:screeningId/seats");
+  const checkoutMatch = useMatch("/checkout/:holdId");
+  const reportCheckoutLock = useCallback((locked) => {
+    checkoutNavigationLocked.current = locked;
+    setPurchaseNavigationLocked(locked);
+  }, []);
+
+  function assertPurchaseResolved() {
+    let savedPurchase = false;
+    const holdId = checkoutDraft?.holdId ?? checkoutMatch?.params.holdId;
+    if (holdId) {
+      try {
+        savedPurchase = Boolean(JSON.parse(
+          sessionStorage.getItem(`rio:checkout:${holdId}`) || "null",
+        )?.purchase);
+      } catch {
+        // The synchronous checkout callback still guards when storage is blocked.
+      }
+    }
+    if (checkoutNavigationLocked.current || savedPurchase) {
+      throw new Error("Finish or recover the purchase in checkout before navigating or changing accounts.");
+    }
+  }
+
+  function go(path, options) {
+    setMenuOpen(false);
+    setNavigationError("");
+    navigate(path, options);
+  }
+
+  async function releaseHoldIfPresent(holdId) {
+    if (!holdId) return;
+    try {
+      await bookingService.releaseHold(holdId);
+    } catch (error) {
+      if (![404, 410].includes(error.status) && error.code !== "HOLD_ALREADY_CONSUMED") throw error;
+    }
+  }
+
+  async function releaseCheckout() {
+    assertPurchaseResolved();
+    await releaseHoldIfPresent(checkoutDraft?.holdId ?? checkoutMatch?.params.holdId);
+    setCheckoutDraft(null);
+  }
+
+  async function navigateSafely(action, { release = true } = {}) {
+    if (navigationInProgress.current) return;
+    navigationInProgress.current = true;
+    try {
+      assertPurchaseResolved();
+      if (release) await releaseCheckout();
+      await action();
+    } catch (error) {
+      setNavigationError(error.message || "Unable to leave checkout.");
+    } finally {
+      navigationInProgress.current = false;
+    }
+  }
+
+  /* Catalogue sections mount after asynchronous reference data loads.
+   * Observe that mount so navigation from another route can still scroll.
+   */
+  useEffect(() => {
+    if (location.pathname !== "/") {
+      window.scrollTo({ top: 0 });
+      return;
+    }
+    const sectionId = location.hash.slice(1);
+    if (!homeSections.has(sectionId)) return;
+
+    function scrollIfReady() {
+      const section = document.getElementById(sectionId);
+      if (!section) return false;
+      section.scrollIntoView({ behavior: "smooth" });
+      return true;
+    }
+    if (scrollIfReady()) return;
+    const observer = new MutationObserver(() => {
+      if (scrollIfReady()) observer.disconnect();
+    });
+    observer.observe(document.getElementById("root"), {
+      childList: true,
+      subtree: true,
+    });
+    return () => observer.disconnect();
+  }, [location.pathname, location.hash]);
+
+  function navigateHome(event, sectionId = "home") {
+    event?.preventDefault();
+    const target = homeSections.has(sectionId) ? sectionId : "home";
+    void navigateSafely(() => {
+      go(`/#${target}`);
+      document.getElementById(target)?.scrollIntoView({ behavior: "smooth" });
+    });
+  }
+
+  function openMovie(movie) {
+    void navigateSafely(() => go(`/movies/${encodeURIComponent(movie.id)}`));
+  }
+
+  function openSeatSelection(screeningId) {
+    if (!bookingEnabled) return;
+    void navigateSafely(() => go(`/screenings/${encodeURIComponent(screeningId)}/seats`));
+  }
+
+  async function returnToMovie() {
+    try {
+      const response = await bookingService.getScreening(seatsMatch?.params.screeningId);
+      void navigateSafely(() => go(`/movies/${encodeURIComponent(response.data.movieId)}`));
+    } catch {
+      navigateHome(undefined, "movies");
+    }
+  }
+
+  // SeatSelection creates the hold; App only stores navigation context.
+  function handleHoldCreated(hold) {
+    if (typeof hold?.id !== "string" || typeof hold.screeningId !== "string") {
+      throw new Error("The hold is missing its identifiers.");
+    }
+    setCheckoutDraft((previous) => ({
+      holdId: hold.id,
+      screeningId: hold.screeningId,
+      customer: previous?.screeningId === hold.screeningId ? previous.customer : undefined,
+    }));
+    go(`/checkout/${encodeURIComponent(hold.id)}`, {
+      state: { screeningId: hold.screeningId },
+    });
+  }
+
+  async function returnToSeats(draft) {
+    assertPurchaseResolved();
+    await releaseHoldIfPresent(draft?.holdId);
+    setCheckoutDraft({
+      holdId: null,
+      screeningId: draft?.screeningId,
+      customer: { name: draft?.customer?.name ?? "", email: draft?.customer?.email ?? "" },
+    });
+    go(draft?.screeningId
+      ? `/screenings/${encodeURIComponent(draft.screeningId)}/seats`
+      : "/#movies");
+  }
+
+  function handleBookingCreated(receipt) {
+    if (typeof receipt?.reference !== "string" || receipt.bookingStatus !== "confirmed" ||
+        !["simulated", "paid"].includes(receipt.paymentStatus)) {
+      throw new Error("The purchase result could not be confirmed. Retry from checkout.");
+    }
+    checkoutNavigationLocked.current = false;
+    setPurchaseNavigationLocked(false);
+    setCheckoutDraft(null);
+    go(`/bookings/${encodeURIComponent(receipt.reference)}/confirmation`, { replace: true });
+  }
+
+  // Header login keeps the hold; checkout checkpoints preserve its contacts.
+  function openLogin() {
+    void navigateSafely(() => go("/login", {
+      state: { returnTo: location.pathname === "/staff/login"
+        ? "/" : location.pathname + location.hash },
+    }), { release: false });
+  }
+
+  function openCheckoutLogin(draft) {
+    assertPurchaseResolved();
+    if (draft?.holdId !== checkoutMatch?.params.holdId) return;
+    setCheckoutDraft(draft);
+    go("/login", { state: { returnTo: `/checkout/${encodeURIComponent(draft.holdId)}` } });
+  }
+
+  function openRegister() {
+    void navigateSafely(() => go("/register", {
+      state: { returnTo: location.state?.returnTo ?? "/" },
+    }), { release: false });
+  }
+
+  function loginFromRegister() {
+    void navigateSafely(() => go("/login", {
+      state: { returnTo: location.state?.returnTo ?? "/" },
+    }), { release: false });
+  }
+
+  // Forms already authenticated. Never submit their credentials a second time.
+  function handleAuthenticated(account) {
+    if (account?.role !== "customer") return;
+    const requested = location.state?.returnTo;
+    const allowed = typeof requested === "string" && requested.startsWith("/") &&
+      !requested.startsWith("//") && !requested.includes("\\") &&
+      !["/login", "/register", "/staff/login"].includes(requested.split(/[?#]/)[0]);
+    setLogoutError(null);
+    go(allowed ? requested : "/#movies", { replace: true });
+  }
+
+  function openBookingHistory() {
+    void navigateSafely(() => go("/my-bookings"));
+  }
+
+  async function handleLogout() {
+    if (isSubmitting || isSessionLoading) return;
+    setLogoutError(null);
+    await navigateSafely(async () => {
+      await logout();
+      go("/", { replace: true });
+    });
+  }
+
+  function openStaffLogin() {
+    void navigateSafely(() => go("/staff/login"));
+  }
+
+  function handleStaffAuthenticated(account) {
+    if (!["owner", "cashier"].includes(account?.role)) {
+      throw new Error("An owner or cashier account is required.");
+    }
+    setMenuOpen(false);
+    setLogoutError(null);
+    navigate(account.role === "owner" ? "/admin" : "/cashier", {
+      replace: true,
+    });
+  }
+
+  async function handleStaffLogout() {
+    if (staffSession.isSubmitting) return;
+    setLogoutError(null);
+    setMenuOpen(false);
+    try {
+      await staffSession.logout();
+      navigate("/staff/login", { replace: true });
+    } catch (error) {
+      setLogoutError(error);
+    }
+  }
+
+  const backToMovies = () => navigateHome(undefined, "movies");
+  const ownerOpen =
+    location.pathname === "/admin" || location.pathname.startsWith("/admin/");
+  const cashierOpen =
+    location.pathname === "/cashier" ||
+    location.pathname.startsWith("/cashier/");
+  const adminTab = location.pathname.split("/")[2] || "overview";
+  const Layout = ownerOpen ? AdminLayout : CustomerLayout;
+
+  function changeAdminTab(tab) {
+    if (!Object.hasOwn(ownerTabs, tab)) return;
+    void navigateSafely(() => go(`/admin/${tab}`));
+  }
+
+  function handleLogoClick(event) {
+    if (ownerOpen || cashierOpen) {
+      event?.preventDefault();
+      void navigateSafely(() => go(ownerOpen ? "/admin/overview" : "/cashier"));
+    } else {
+      navigateHome(event);
+    }
+  }
+
+  return (
+    <Layout
+      onLogoClick={handleLogoClick}
+      headerProps={{
+        menuOpen,
+        setMenuOpen,
+        adminOpen: ownerOpen,
+        cashierOpen,
+        currentStaff: staffSession.staff,
+        adminTab,
+        changeAdminTab,
+        onStaffLogout: handleStaffLogout,
+        user: isCustomer ? user : null,
+        navigateHome,
+        openLogin,
+        handleLogout,
+        openBookingHistory,
+      }}
+    >
+      {navigationError && (
+        <div className="container"><p className="admin-edit-error" role="alert">{navigationError}</p></div>
+      )}
+      {checkoutDraft?.holdId && !checkoutMatch &&
+        !["/login", "/register"].includes(location.pathname) && (
+          <div className="container">
+            <button type="button" className="secondary-button" onClick={() => go(
+              `/checkout/${encodeURIComponent(checkoutDraft.holdId)}`,
+            )}>Return to your checkout</button>
+          </div>
+        )}
+      {logoutError && (
+        <div className="container">
+          <RequestState
+            error={logoutError}
+            onRetry={
+              location.pathname.startsWith("/admin") ||
+              location.pathname.startsWith("/cashier")
+                ? handleStaffLogout
+                : handleLogout
+            }
+          />
+        </div>
+      )}
+      <Routes>
+        <Route
+          path="/"
+          element={
+            <CatalogueHome
+              city={city}
+              onCityChange={setCity}
+              navigateHome={navigateHome}
+              openMovie={openMovie}
+            />
+          }
+        />
+        <Route
+          path="/movies/:movieId"
+          element={<MovieDetails city={city} onBack={backToMovies}
+            onChooseSeats={openSeatSelection} />}
+        />
+        <Route path="/screenings/:screeningId/seats" element={
+          !bookingEnabled ? <FeaturePlaceholder title="Booking unavailable" onBack={backToMovies}>Use matching demo modes.</FeaturePlaceholder>
+            : checkoutDraft?.holdId ? <Navigate to={`/checkout/${encodeURIComponent(checkoutDraft.holdId)}`} replace />
+            : <SeatSelection onBack={returnToMovie} onHoldCreated={handleHoldCreated} />
+        } />
+        <Route path="/checkout/:holdId" element={
+          <Checkout contactDraft={checkoutDraft} onLogin={openCheckoutLogin}
+            onBack={returnToSeats} onBookingCreated={handleBookingCreated}
+            onNavigationLockChange={reportCheckoutLock} />
+        } />
+        <Route path="/bookings/:reference/confirmation" element={
+          <BookingConfirmation onBackToMovies={backToMovies} onViewBookings={openBookingHistory} />
+        } />
+        <Route
+          path="/login"
+          element={
+            purchaseNavigationLocked && checkoutDraft?.holdId
+              ? <Navigate to={`/checkout/${encodeURIComponent(checkoutDraft.holdId)}`} replace />
+              : <Login
+              onLogin={handleAuthenticated}
+              onRegister={openRegister}
+              onStaffLogin={openStaffLogin}
+            />
+          }
+        />
+        <Route
+          path="/register"
+          element={
+            purchaseNavigationLocked && checkoutDraft?.holdId
+              ? <Navigate to={`/checkout/${encodeURIComponent(checkoutDraft.holdId)}`} replace />
+              : <Register onRegister={handleAuthenticated} onLogin={loginFromRegister} />
+          }
+        />
+        <Route
+          path="/staff/login"
+          element={
+            purchaseNavigationLocked && checkoutDraft?.holdId
+              ? <Navigate to={`/checkout/${encodeURIComponent(checkoutDraft.holdId)}`} replace />
+              : <StaffLogin
+              onAuthenticated={handleStaffAuthenticated}
+              onCustomerLogin={openLogin}
+            />
+          }
+        />
+        <Route
+          path="/admin"
+          element={
+            <StaffWorkspace
+              role="owner"
+              onTabChange={changeAdminTab}
+              session={staffSession}
+              onLogout={handleStaffLogout}
+            />
+          }
+        />
+        <Route
+          path="/admin/:tab"
+          element={
+            <StaffWorkspace
+              role="owner"
+              onTabChange={changeAdminTab}
+              session={staffSession}
+              onLogout={handleStaffLogout}
+              tab={adminTab}
+            />
+          }
+        />
+        <Route
+          path="/cashier"
+          element={
+            <StaffWorkspace
+              role="cashier"
+              session={staffSession}
+              onLogout={handleStaffLogout}
+            />
+          }
+        />
+        <Route
+          path="/my-bookings"
+          element={
+            isSessionLoading ? <RequestState loading loadingMessage="Checking your account…" />
+              : !isCustomer ? <Navigate to="/login" state={{ returnTo: "/my-bookings" }} replace />
+              : <BookingHistory onExploreMovies={backToMovies} />
+          }
+        />
+        <Route
+          path="*"
+          element={
+            <FeaturePlaceholder title="Page unavailable" onBack={backToMovies}>
+              This page has not been added to the new frontend yet.
+            </FeaturePlaceholder>
+          }
+        />
+      </Routes>
+    </Layout>
+  );
+}
+
 export default App;

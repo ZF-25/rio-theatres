@@ -1,205 +1,207 @@
-// useState lets this component remember whether the mobile menu is open.
-import { useState } from 'react'
+/*
+ * FILE: frontend/src/components/Header.jsx
+ *
+ * PURPOSE
+ * -------
+ * Displays navigation for customers, owners, and cashiers.
+ *
+ * ACCOUNT NAME UPDATE
+ * -------------------
+ * The cashier label uses getUserDisplayName() so it supports
+ * firstName and lastName from both demo and API profiles.
+ *
+ * Navigation and logout callbacks are supplied by App.jsx.
+ * This component does not authenticate users or load accounts.
+ */
 
-// Link and NavLink navigate between React Router pages without
-// refreshing the entire website.
-//
-// NavLink also adds aria-current="page" when its route is active.
-// Our CSS uses that attribute to highlight the current page.
-import { Link, NavLink } from 'react-router-dom'
+import logo from "../assets/rio-theaters-logo.png";
+import { getUserDisplayName } from "../utils/userName.js";
 
-// Importing the logo allows Vite to find it and include it
-// in the production build.
-import logo from '../assets/rio-theaters-logo.png'
-
-// Each navigation item is an array containing:
-// [the destination URL, the text displayed to the user]
-//
-// Keeping these items in an array means we can generate the links
-// with map() instead of repeating the same JSX for every link.
-//
-// These match the public links in the original design.
-// My bookings is not displayed in the public navigation.
 const customerNavigation = [
-  ['/movies', 'Movies'],
-  ['/locations', 'Locations'],
-  ['/contact', 'Contact'],
-  ['/about', 'About'],
-]
+  ["movies", "Movies"],
+  ["locations", "Locations"],
+  ["contact", "Contact"],
+  ["about", "About"],
+];
 
-// Administrator pages use a different set of navigation links.
-// Their URLs start with /admin to keep them grouped together.
-//
-// These links only provide navigation. They do not protect admin
-// pages. Authentication and permissions will be implemented later.
 const adminNavigation = [
-  ['/admin', 'Overview'],
-  ['/admin/screenings', 'Screenings'],
-  ['/admin/bookings', 'Bookings'],
-  ['/admin/seats', 'Seats'],
-  ['/admin/cashiers', 'Cashiers'],
-]
+  ["overview", "Overview"],
+  ["screenings", "Screenings"],
+  ["bookings", "Bookings"],
+  ["seats", "Seats"],
+  ["cashiers", "Cashiers"],
+];
 
-// The variant prop decides which version of the header to display.
-//
-// Examples:
-// <Header />                  displays customer navigation.
-// <Header variant="admin" />  displays administrator navigation.
-//
-// If no variant is provided, it defaults to "customer".
-function Header({ variant = 'customer' }) {
-  // menuOpen stores the mobile menu's current state:
-  // false means closed; true means open.
-  //
-  // Calling setMenuOpen updates the state and causes React to
-  // render the component again with the new value.
-  const [menuOpen, setMenuOpen] = useState(false)
+function Header({
+  adminOpen = false,
+  cashierOpen = false,
+  currentStaff,
+  adminTab,
+  menuOpen,
+  setMenuOpen,
+  user,
+  onLogoClick,
+  navigateHome,
+  changeAdminTab,
+  exitAdminPreview,
+  onStaffLogout,
+  openBookingHistory,
+  handleLogout,
+  openLogin,
+}) {
+  // Support the existing logout prop while accepting the newer name.
+  const staffLogout = onStaffLogout ?? exitAdminPreview;
 
-  // This comparison produces a boolean: true or false.
-  // We reuse it to choose the logo destination, links, and labels.
-  const isAdmin = variant === 'admin'
+  const navigationLabel = adminOpen
+    ? "Administration navigation"
+    : cashierOpen
+      ? "Cashier navigation"
+      : "Main navigation";
 
-  // The ternary operator chooses one of the two navigation arrays:
-  // condition ? valueIfTrue : valueIfFalse
-  const navigation = isAdmin
-    ? adminNavigation
-    : customerNavigation
+  const logoLabel = adminOpen
+    ? "Rio Theaters admin overview"
+    : cashierOpen
+      ? "Rio Theaters cashier reservations"
+      : "Rio Theaters home";
 
-  // Close the mobile menu after a user selects a navigation link.
-  // On desktop, setting this state to false has no visual effect
-  // because CSS displays the desktop navigation independently.
   function closeMenu() {
-    setMenuOpen(false)
+    setMenuOpen(false);
   }
 
-  // Keyboard events from elements inside the header bubble up
-  // to the header, allowing this handler to detect Escape.
-  function handleKeyDown(event) {
-    // Only act when Escape is pressed and the menu is open.
-    if (event.key === 'Escape' && menuOpen) {
-      setMenuOpen(false)
+  function logoutStaff() {
+    closeMenu();
+    staffLogout?.();
+  }
 
-      // currentTarget is the header element where this handler
-      // is attached. Find its menu button and return focus to it.
-      //
-      // This prevents keyboard focus from remaining inside the
-      // navigation after the mobile menu has been hidden.
-      //
-      // The ?. operator calls focus() only if the button exists.
-      event.currentTarget
-        .querySelector('.menu-toggle')
-        ?.focus()
-    }
+  function openReservations(event) {
+    closeMenu();
+    onLogoClick?.(event);
   }
 
   return (
-    // <header> identifies the introductory area of the page.
-    // className connects this element to our CSS styles.
-    <header
-      className="site-header"
-      onKeyDown={handleKeyDown}
-    >
-      {/* This container controls the width and alignment
-          of the logo, menu button, and navigation. */}
+    <header className="site-header">
       <div className="container header-content">
-        {/* Link changes the route without a full page reload.
-            The logo leads to the appropriate home page. */}
-        <Link
+        <a
           className="logo-link"
-          to={isAdmin ? '/admin' : '/'}
-          aria-label={
-            isAdmin
-              ? 'Rio Theaters admin overview'
-              : 'Rio Theaters home'
-          }
-          onClick={closeMenu}
+          href={cashierOpen ? "#cashier-page-title" : "#home"}
+          aria-label={logoLabel}
+          onClick={onLogoClick}
         >
-          {/* alt describes the image for users who cannot see it.
-              The link's aria-label describes its destination. */}
-          <img
-            className="navbar-logo"
-            src={logo}
-            alt="Rio Theaters"
-          />
-        </Link>
+          <img className="navbar-logo" src={logo} alt="Rio Theaters" />
+        </a>
 
-        {/* CSS shows this button on smaller screens.
-            type="button" prevents accidental form submission. */}
         <button
           type="button"
           className="menu-toggle"
-          // Tell assistive technology whether the menu is open.
           aria-expanded={menuOpen}
-          // Connect the button to the navigation element below.
           aria-controls="main-navigation"
-          // Use the previous state to switch between open and closed.
           onClick={() => setMenuOpen((open) => !open)}
         >
-          {menuOpen ? 'Close menu' : 'Menu'}
+          {menuOpen ? "Close menu" : "Menu"}
         </button>
 
-        {/* <nav> identifies a group of navigation links.
-            The accessible label explains which navigation this is. */}
         <nav
           id="main-navigation"
-          // Add "is-open" when the mobile menu is open.
-          // Our responsive CSS uses this class to show the menu.
-          className={`main-navigation ${
-            menuOpen ? 'is-open' : ''
-          }`}
-          aria-label={
-            isAdmin
-              ? 'Administration navigation'
-              : 'Main navigation'
-          }
+          className={`main-navigation ${menuOpen ? "is-open" : ""}`}
+          aria-label={navigationLabel}
         >
-          {/* map() creates a NavLink for each item in the array.
-              [path, label] extracts the URL and text from each pair. */}
-          {navigation.map(([path, label]) => (
-            <NavLink
-              // React uses a unique key to identify each list item
-              // when updating the rendered navigation.
-              key={path}
-              to={path}
-              // Match the complete route. For example, /admin
-              // should not also be active on /admin/bookings.
-              end
-              onClick={closeMenu}
-            >
-              {label}
-            </NavLink>
-          ))}
+          {adminOpen ? (
+            <>
+              {/* OWNER NAVIGATION */}
+              {adminNavigation.map(([tab, label]) => (
+                <button
+                  key={tab}
+                  type="button"
+                  className="nav-link-button admin-nav-button"
+                  aria-current={adminTab === tab ? "page" : undefined}
+                  onClick={() => {
+                    closeMenu();
+                    changeAdminTab(tab);
+                  }}
+                >
+                  {label}
+                </button>
+              ))}
 
-          {/* Render a different final link for each header variant.
-              Both use auth-link for the highlighted button styling. */}
-          {isAdmin ? (
-            // This navigates back to the customer website.
-            // It is not a logout action because authentication
-            // has not been implemented in the team repo yet.
-            <Link
-              className="auth-link"
-              to="/"
-              onClick={closeMenu}
-            >
-              Back to website
-            </Link>
+              <button
+                type="button"
+                className="auth-button"
+                onClick={logoutStaff}
+              >
+                Log out
+              </button>
+            </>
+          ) : cashierOpen ? (
+            <>
+              {/* CASHIER NAVIGATION */}
+              <a
+                href="#cashier-page-title"
+                aria-current="page"
+                onClick={openReservations}
+              >
+                Reservations
+              </a>
+
+              {currentStaff && (
+                <span className="staff-nav-name">
+                  Cashier: {getUserDisplayName(currentStaff, "Cashier")}
+                </span>
+              )}
+
+              <button
+                type="button"
+                className="auth-button"
+                onClick={logoutStaff}
+              >
+                Log out
+              </button>
+            </>
           ) : (
-            // NavLink automatically marks this link as current
-            // when the user visits the login page.
-            <NavLink
-              className="auth-link"
-              to="/login"
-              onClick={closeMenu}
-            >
-              Log in
-            </NavLink>
+            <>
+              {/* CUSTOMER NAVIGATION */}
+              {customerNavigation.map(([sectionId, label]) => (
+                <a
+                  key={sectionId}
+                  href={`#${sectionId}`}
+                  onClick={(event) => navigateHome(event, sectionId)}
+                >
+                  {label}
+                </a>
+              ))}
+
+              {user ? (
+                <>
+                  <button
+                    type="button"
+                    className="nav-link-button"
+                    onClick={openBookingHistory}
+                  >
+                    My bookings
+                  </button>
+
+                  <button
+                    type="button"
+                    className="auth-button"
+                    onClick={handleLogout}
+                  >
+                    Log out
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  className="auth-button"
+                  onClick={openLogin}
+                >
+                  Log in
+                </button>
+              )}
+            </>
           )}
         </nav>
       </div>
     </header>
-  )
+  );
 }
 
-// Export the component so other files can import and render it.
-// For example: import Header from '../components/Header.jsx'
-export default Header
+export default Header;
