@@ -53,10 +53,10 @@ SELECT
         ELSE rows.row_index
     END,
 
-    seat_numbers.seat_number,
-    'available',
-    FALSE
-
+seat_numbers.seat_number,
+'available',
+(rows.row_index = 1 AND seat_numbers.seat_number = 1)
+--Теперь первое место первого ряда будет иметь is_owner_seat = TRUE, остальные — FALSE
 FROM rooms r
 
 CROSS JOIN LATERAL
@@ -86,4 +86,23 @@ WHERE r.room_name IN ('Room 1', 'Room 2')
         AND existing.seat_number = seat_numbers.seat_number
   );
 
+-- 4. ENSURE EXACTLY ONE OWNER-RESERVED SEAT PER ROOM
+
+UPDATE seats s
+SET is_owner_seat = (
+    s.row_number = (
+        SELECT MIN(first_seat.row_number)
+        FROM seats first_seat
+        WHERE first_seat.room_id = s.room_id
+    )
+    AND s.seat_number = 1
+)
+WHERE s.room_id IN (
+    SELECT r.room_id
+    FROM rooms r
+    JOIN theaters t ON t.theater_id = r.theater_id
+    WHERE t.name = 'Rio'
+      AND t.city IN ('Oulu', 'Tampere')
+      AND r.room_name IN ('Room 1', 'Room 2')
+);
 COMMIT;
