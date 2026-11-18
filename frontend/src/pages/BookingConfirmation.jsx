@@ -83,6 +83,10 @@ import DemoTicketQR from "../components/DemoTicketQR.jsx";
 function validateReceipt(response, reference) {
   const receipt = response?.data;
 
+  const expiredAllocationReleased = bookingMode === "api" &&
+    receipt?.bookingStatus === "expired" && Array.isArray(receipt.seats) &&
+    receipt.seats.length === 0;
+
   const quoteFields = [
     "adultUnitPriceCents",
     "childUnitPriceCents",
@@ -104,7 +108,7 @@ function validateReceipt(response, reference) {
       receipt.screening?.status,
     ) &&
     Array.isArray(receipt.seats) &&
-    receipt.seats.length > 0 &&
+    (expiredAllocationReleased || receipt.seats.length > 0) &&
     receipt.seats.every((seat) => {
       return (
         typeof seat.id === "string" &&
@@ -116,9 +120,9 @@ function validateReceipt(response, reference) {
     receipt.tickets.adult >= 0 &&
     Number.isInteger(receipt.tickets?.child) &&
     receipt.tickets.child >= 0 &&
-    receipt.tickets.adult +
+    (expiredAllocationReleased || receipt.tickets.adult +
       receipt.tickets.child ===
-      receipt.seats.length &&
+      receipt.seats.length) &&
     receipt.quote?.currency === "EUR" &&
     quoteFields.every((field) => {
       return isValidMoneyAmount(
@@ -596,7 +600,9 @@ function BookingConfirmation({
         )}
 
         <p className="confirmation-note">
-          This project uses simulated payments.
+          {bookingMode === "demo"
+            ? "This project uses simulated payments."
+            : "Payment confirmation is provided by the backend."}
           The demo QR is not validated for cinema admission.
         </p>
       </article>
