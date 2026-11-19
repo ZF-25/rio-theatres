@@ -180,8 +180,8 @@ async function createBooking(owner, idempotencyKey, rawBody) {
       // Find the hold's screening, then lock in the SAME order as holds:
       // screening row first, then the hold.
       const found = await client.query(
-        'SELECT screening_id FROM checkout_holds WHERE checkout_hold_id = $1 AND user_id = $2',
-        [Number(input.holdId), owner.userId]
+        'SELECT screening_id FROM checkout_holds WHERE checkout_hold_id = $1 AND ((user_id IS NOT NULL AND user_id = $2) OR (user_id IS NULL AND session_id = $3))',
+       [Number(input.holdId), owner.userId, owner.sessionId]
       );
       if (found.rows.length === 0) throw notFound('Hold not found');
 
@@ -201,10 +201,15 @@ async function createBooking(owner, idempotencyKey, rawBody) {
 
       const holdResult = await client.query(
         `SELECT *, expires_at <= NOW() AS expired
-           FROM checkout_holds
-          WHERE checkout_hold_id = $1 AND user_id = $2
-          FOR UPDATE`,
-        [Number(input.holdId), owner.userId]
+FROM checkout_holds
+WHERE checkout_hold_id = $1
+  AND (
+    (user_id IS NOT NULL AND user_id = $2)
+    OR
+    (user_id IS NULL AND session_id = $3)
+  )
+FOR UPDATE`,
+       [Number(input.holdId), owner.userId, owner.sessionId]
       );
       const hold = holdResult.rows[0];
       if (!hold) throw notFound('Hold not found');
@@ -241,7 +246,7 @@ async function createBooking(owner, idempotencyKey, rawBody) {
             movie_id, movie_title, movie_poster_url, theater_id, cinema_name, cinema_city,
             room_id, room_name, starts_at,
             adult_count, child_count, adult_unit_cents, child_unit_cents, total_cents, payment_method)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, FALSE, $8, $9,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, ($1 IS NULL), $8, $9,
                  $10, $11, $12, $13, $14, $15, $16, $17, $18,
                  $19, $20, $21, $22, $23, $24)
          RETURNING booking_id`,
@@ -444,12 +449,26 @@ async function expireSession(client, session) {
 // Only the account that bought it can read it. A reference alone grants no
 // access: unknown and foreign references are both 404.
 async function getBooking(owner, reference) {
-  if (typeof reference !== 'string' || reference.length > 20) throw notFound('Booking not found');
+  if (typeof reference !== 'string' || reference.length > 20) {
+    throw notFound('Booking not found');
+  }
+
   const { rows } = await pool.query(
-    'SELECT booking_id FROM bookings WHERE reference = $1 AND user_id = $2',
-    [reference.toUpperCase(), owner.userId]
+    `SELECT booking_id
+       FROM bookings
+      WHERE reference = $1
+        AND (
+          (user_id IS NOT NULL AND user_id = $2)
+          OR
+          (user_id IS NULL AND session_id = $3)
+        )`,
+    [reference.toUpperCase(), owner.userId, owner.sessionId]
   );
-  if (rows.length === 0) throw notFound('Booking not found');
+
+  if (rows.length === 0) {
+    throw notFound('Booking not found');
+  }
+
   const [resource] = await loadBookingResources(pool, [rows[0].booking_id]);
   return resource;
 }

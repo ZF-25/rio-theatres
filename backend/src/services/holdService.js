@@ -195,18 +195,33 @@ async function createHold(owner, idempotencyKey, rawBody) {
 // Finds a hold owned by this customer, or 404 without revealing whether a
 // foreign hold exists.
 async function findOwnedHold(db, owner, holdIdParam, { lock = false } = {}) {
-  if (!isDbId(holdIdParam)) throw notFound('Hold not found');
+  if (!isDbId(holdIdParam)) {
+    throw notFound('Hold not found');
+  }
+
   const { rows } = await db.query(
-    `SELECT checkout_hold_id, screening_id, status, expires_at <= NOW() AS expired
-       FROM checkout_holds
-      WHERE checkout_hold_id = $1 AND user_id = $2
-      ${lock ? 'FOR UPDATE' : ''}`,
-    [Number(holdIdParam), owner.userId]
+    `SELECT
+       checkout_hold_id,
+       screening_id,
+       status,
+       expires_at <= NOW() AS expired
+     FROM checkout_holds
+     WHERE checkout_hold_id = $1
+       AND (
+         (user_id IS NOT NULL AND user_id = $2)
+         OR
+         (user_id IS NULL AND session_id = $3)
+       )
+     ${lock ? 'FOR UPDATE' : ''}`,
+    [Number(holdIdParam), owner.userId, owner.sessionId]
   );
-  if (rows.length === 0) throw notFound('Hold not found');
+
+  if (rows.length === 0) {
+    throw notFound('Hold not found');
+  }
+
   return rows[0];
 }
-
 // ---------- GET /holds/:id ----------
 // Only active holds are returned: expired/released -> 410, consumed -> 409.
 async function getHold(owner, holdIdParam) {
