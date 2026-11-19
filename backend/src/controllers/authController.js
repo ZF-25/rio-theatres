@@ -3,7 +3,7 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const pool = require('../config/db');
 const { mapDatabaseRoleToApiRole } = require('../utils/roleMapper');
-
+const { attachSessionHoldsToUser } = require('../services/holdService');
 const SESSION_DURATION = 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_NAME = 'rio_session';
 
@@ -54,14 +54,6 @@ const register = async (req, res) => {
       (field) => !allowedFields.includes(field)
     );
 
-    if (error.code === '23505') {
-  return res.status(409).json({
-    error: {
-      code: 'EMAIL_IN_USE',
-      message: 'An account with this email already exists'
-    }
-  });
-}
     if (unknownFields.length > 0) {
       return res.status(422).json({
         error: {
@@ -217,25 +209,35 @@ const register = async (req, res) => {
     const newCsrfHash = hashToken(newCsrfToken);
 
     // Create a new authenticated session.
-    await client.query(
-      `INSERT INTO sessions (
-         user_id,
-         token_hash,
-         expires_at,
-         last_activity_at,
-         csrf_token_hash,
-         created_at
-       )
-       VALUES (
-         $1,
-         $2,
-         NOW() + INTERVAL '24 hours',
-         NOW(),
-         $3,
-         NOW()
-       )`,
-      [user.user_id, newTokenHash, newCsrfHash]
-    );
+const newSessionResult = await client.query(
+  `INSERT INTO sessions (
+     user_id,
+     token_hash,
+     expires_at,
+     last_activity_at,
+     csrf_token_hash,
+     created_at
+   )
+   VALUES (
+     $1,
+     $2,
+     NOW() + INTERVAL '24 hours',
+     NOW(),
+     $3,
+     NOW()
+   )
+   RETURNING session_id`,
+  [user.user_id, newTokenHash, newCsrfHash]
+);
+
+const newSessionId = newSessionResult.rows[0].session_id;
+
+// Transfer active guest holds to the new authenticated session.
+await attachSessionHoldsToUser(client, {
+  sessionId: currentSession.session_id,
+  userId: user.user_id,
+  newSessionId
+});
 
     // Remove the previous guest session.
     await client.query(
@@ -438,19 +440,29 @@ const login = async (req, res) => {
     const newCsrfToken = generateCsrfToken(newSessionToken);
     const newCsrfHash = hashToken(newCsrfToken);
 
-    await client.query(
-      `INSERT INTO sessions (
-         user_id,
-         token_hash,
-         expires_at,
-         last_activity_at,
-         csrf_token_hash,
-         created_at
-       )
-       VALUES ($1, $2, NOW() + INTERVAL '24 hours',
-               NOW(), $3, NOW())`,
-      [user.user_id, newTokenHash, newCsrfHash]
-    );
+   const newSessionResult = await client.query(
+  `INSERT INTO sessions (
+     user_id,
+     token_hash,
+     expires_at,
+     last_activity_at,
+     csrf_token_hash,
+     created_at
+   )
+   VALUES ($1, $2, NOW() + INTERVAL '24 hours',
+           NOW(), $3, NOW())
+   RETURNING session_id`,
+  [user.user_id, newTokenHash, newCsrfHash]
+);
+
+const newSessionId = newSessionResult.rows[0].session_id;
+
+// Transfer active guest holds to the authenticated session.
+await attachSessionHoldsToUser(client, {
+  sessionId: oldSessionResult.rows[0].session_id,
+  userId: user.user_id,
+  newSessionId
+});
 
     // Remove the previous guest session
     await client.query(
