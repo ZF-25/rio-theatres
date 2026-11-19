@@ -90,6 +90,39 @@ async function importMovie(tmdbIdInput, { localMovieId } = {}) {
       action = 'created';
     }
 
+    // Sync movie genres from TMDB.
+    // First, find or create each genre, then replace the movie's links.
+    const genreIds = [];
+
+    for (const genre of details.genres || []) {
+      const result = await client.query(
+        `INSERT INTO genres (tmdb_genre_id, name)
+         VALUES ($1, $2)
+         ON CONFLICT (tmdb_genre_id)
+         DO UPDATE SET name = EXCLUDED.name
+         RETURNING genre_id`,
+        [genre.tmdbId, genre.name]
+      );
+
+      genreIds.push(result.rows[0].genre_id);
+    }
+
+    // Remove old links so the database always reflects the latest TMDB data.
+    await client.query(
+      'DELETE FROM movie_genres WHERE movie_id = $1',
+      [movieId]
+    );
+
+    // Add the current genre links.
+    for (const genreId of genreIds) {
+      await client.query(
+        `INSERT INTO movie_genres (movie_id, genre_id)
+         VALUES ($1, $2)
+         ON CONFLICT (movie_id, genre_id) DO NOTHING`,
+        [movieId, genreId]
+      );
+    }
+
     await client.query('COMMIT');
     return { action, movieId, tmdbId, title: details.title, durationMinutes: details.durationMinutes,
       ageRating: details.ageRating };
