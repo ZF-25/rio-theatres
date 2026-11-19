@@ -1,0 +1,14 @@
+/* Movie details: upcoming showtimes grouped by Helsinki date. */
+.grouped-screening-selectors {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+.grouped-screening-selectors > label:last-child { grid-column: auto; }
+.screening-date-groups { display: grid; gap: 1.25rem; }
+.screening-date-group { min-width: 0; }
+.screening-date-group h3 { margin: 0 0 .75rem; font-size: 1.05rem; }
+.screening-date-times { display: flex; flex-wrap: wrap; gap: .75rem; }
+.screening-date-times .screening-time-button { max-width: 100%; white-space: normal; }
+@media (max-width: 540px) {
+  .grouped-screening-selectors { grid-template-columns: 1fr; }
+  .screening-date-times .screening-time-button { width: 100%; }
+}

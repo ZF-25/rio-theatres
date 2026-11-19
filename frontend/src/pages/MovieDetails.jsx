@@ -1,3 +1,4 @@
+import "./MovieDetails.css";
 /*
  * FILE: frontend/src/pages/MovieDetails.jsx
  *
@@ -61,6 +62,7 @@ import {
 import {
   cinemaDate,
   cinemaTime,
+  formatCinemaDate,
 } from "../utils/cinemaTime.js";
 
 import RequestState from "../components/RequestState.jsx";
@@ -110,7 +112,7 @@ function MovieDetailsContent({
     cinemaId: "",
     roomId: "",
     screeningId: "",
-    date: cinemaDate(),
+    date: "",
   });
 
   const [failedPoster, setFailedPoster] =
@@ -238,8 +240,7 @@ function MovieDetailsContent({
       if (
         !movie ||
         !cinema ||
-        !room ||
-        !selection.date
+        !room
       ) {
         return Promise.resolve([]);
       }
@@ -254,7 +255,7 @@ function MovieDetailsContent({
               movieId,
               cinemaId: cinema.id,
               roomId: room.id,
-              date: selection.date,
+              date: selection.date || undefined,
             },
             options,
           );
@@ -277,6 +278,16 @@ function MovieDetailsContent({
 
   const screenings =
     screeningsResult.data ?? [];
+
+  // Use Helsinki calendar dates rather than the visitor's timezone.
+  const grouped = new Map();
+  [...screenings].sort((a, b) => a.startsAt.localeCompare(b.startsAt))
+    .forEach((screening) => {
+      const date = cinemaDate(screening.startsAt);
+      if (!grouped.has(date)) grouped.set(date, []);
+      grouped.get(date).push(screening);
+    });
+  const screeningGroups = [...grouped.entries()];
 
   const selectedScreening =
     screenings.find((item) => {
@@ -588,7 +599,7 @@ function MovieDetailsContent({
             loadingMessage="Loading cinemas and rooms…"
           />
 
-          <div className="screening-selectors">
+          <div className="screening-selectors grouped-screening-selectors">
             <label htmlFor="details-cinema">
               <span>Cinema</span>
 
@@ -658,57 +669,13 @@ function MovieDetailsContent({
               </select>
             </label>
 
-            <label htmlFor="details-screening">
-              <span>Screening</span>
-
-              <select
-                id="details-screening"
-                value={
-                  selectedScreening?.id ?? ""
-                }
-                disabled={
-                  !canShowScreenings ||
-                  screeningsResult.loading ||
-                  Boolean(
-                    screeningsResult.error,
-                  ) ||
-                  screenings.length === 0
-                }
-                onChange={(event) => {
-                  const screeningId =
-                    event.target.value;
-
-                  setSelection((previous) => ({
-                    ...previous,
-                    screeningId,
-                  }));
-                }}
-              >
-                <option value="">
-                  {screenings.length > 0
-                    ? "Select time"
-                    : "No times"}
-                </option>
-
-                {screenings.map((item) => (
-                  <option
-                    key={item.id}
-                    value={item.id}
-                  >
-                    {cinemaTime(
-                      item.startsAt,
-                    )}
-                  </option>
-                ))}
-              </select>
-            </label>
           </div>
 
           <label
             className="screening-date"
             htmlFor="details-date"
           >
-            <span>Screening date</span>
+            <span>Filter by date (optional)</span>
 
             <input
               id="details-date"
@@ -722,6 +689,13 @@ function MovieDetailsContent({
               }}
             />
           </label>
+
+          {selection.date && (
+            <button type="button" className="secondary-button"
+              onClick={() => changeSelection({ date: "" })}>
+              Show all upcoming dates
+            </button>
+          )}
 
           {cinema && room && (
             <p className="screening-room-summary">
@@ -768,42 +742,32 @@ function MovieDetailsContent({
 
               {!screeningsResult.loading &&
                 !screeningsResult.error && (
-                  <div className="screening-times">
+                  <div className="screening-times screening-date-groups">
                     {screenings.length > 0 ? (
-                      screenings.map((item) => {
-                        const soldOut =
-                          item.availableSeatCount === 0;
-
-                        return (
-                          <button
-                            key={item.id}
-                            type="button"
-                            className={`screening-time-button ${
-                              selectedScreening?.id === item.id
-                                ? "is-selected"
-                                : ""
-                            }`}
-                            disabled={
-                              soldOut ||
-                              !bookingConnected ||
-                              typeof onChooseSeats !==
-                                "function"
-                            }
-                            onClick={() => {
-                              chooseScreening(item);
-                            }}
-                          >
-                            {cinemaTime(
-                              item.startsAt,
-                            )}
-                            {" · "}
-
-                            {soldOut
-                              ? "Sold out"
-                              : `Choose seats (${item.availableSeatCount} available)`}
-                          </button>
-                        );
-                      })
+                      screeningGroups.map(([date, items]) => (
+                        <section className="screening-date-group" key={date}
+                          aria-labelledby={`screenings-${date}`}>
+                          <h3 id={`screenings-${date}`}>
+                            {formatCinemaDate(items[0].startsAt)}
+                          </h3>
+                          <div className="screening-date-times">
+                            {items.map((item) => {
+                              const soldOut = item.availableSeatCount === 0;
+                              return (
+                                <button key={item.id} type="button"
+                                  className="screening-time-button"
+                                  disabled={soldOut || !bookingConnected || typeof onChooseSeats !== "function"}
+                                  onClick={() => chooseScreening(item)}
+                                  aria-label={`${formatCinemaDate(item.startsAt)}, ${cinemaTime(item.startsAt)}, ${soldOut ? "sold out" : `${item.availableSeatCount} seats available. Choose seats`}`}>
+                                  {cinemaTime(item.startsAt)} · {soldOut
+                                    ? "Sold out"
+                                    : `Choose seats (${item.availableSeatCount} available)`}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </section>
+                      ))
                     ) : (
                       <p
                         className="screening-empty-message"
@@ -811,7 +775,7 @@ function MovieDetailsContent({
                       >
                         {selection.date
                           ? "No screenings available for this date and room."
-                          : "Choose a date to see available screenings."}
+                          : "No upcoming screenings available for this movie in the selected cinema and room."}
                       </p>
                     )}
                   </div>
