@@ -88,6 +88,10 @@ async function getMovieDetails(tmdbId) {
     posterUrl: data.poster_path ? IMAGE_BASE_URL + data.poster_path : null,
     trailerUrl: pickTrailerUrl(data.videos),
     ageRating: pickAgeRating(data.release_dates),
+    genres: (data.genres || []).map((genre) => ({
+    tmdbId: genre.id,
+    name: genre.name,
+})),
   };
 }
 

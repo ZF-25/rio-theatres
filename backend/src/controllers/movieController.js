@@ -8,7 +8,7 @@ const { sendData, sendList } = require('../utils/respond');
 // GET /movies?cinemaId=&search=&genreId=&page=&pageSize=
 async function listMovies(req, res) {
   const cinemaId = filterId(req.query.cinemaId, 'cinemaId');
-  const genreId = req.query.genreId;
+  const genreId = filterId(req.query.genreId, 'genreId');
   const search = searchText(req.query.search);
   const page = pagination(req.query);
 
@@ -20,7 +20,12 @@ async function listMovies(req, res) {
     throw validationError('genreId', 'Unknown genre.');
   }
 
-  const { items, totalItems } = await movieService.listMovies({ cinemaId, search, ...page });
+ const { items, totalItems } = await movieService.listMovies({
+  cinemaId,
+  search,
+  genreId,
+  ...page
+});
   sendList(res, items, { ...page, totalItems });
 }
 
