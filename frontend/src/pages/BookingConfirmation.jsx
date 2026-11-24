@@ -83,6 +83,10 @@ import DemoTicketQR from "../components/DemoTicketQR.jsx";
 function validateReceipt(response, reference) {
   const receipt = response?.data;
 
+  const expiredAllocationReleased = bookingMode === "api" &&
+    receipt?.bookingStatus === "expired" && Array.isArray(receipt.seats) &&
+    receipt.seats.length === 0;
+
   const quoteFields = [
     "adultUnitPriceCents",
     "childUnitPriceCents",
@@ -104,7 +108,7 @@ function validateReceipt(response, reference) {
       receipt.screening?.status,
     ) &&
     Array.isArray(receipt.seats) &&
-    receipt.seats.length > 0 &&
+    (expiredAllocationReleased || receipt.seats.length > 0) &&
     receipt.seats.every((seat) => {
       return (
         typeof seat.id === "string" &&
@@ -116,9 +120,9 @@ function validateReceipt(response, reference) {
     receipt.tickets.adult >= 0 &&
     Number.isInteger(receipt.tickets?.child) &&
     receipt.tickets.child >= 0 &&
-    receipt.tickets.adult +
+    (expiredAllocationReleased || receipt.tickets.adult +
       receipt.tickets.child ===
-      receipt.seats.length &&
+      receipt.seats.length) &&
     receipt.quote?.currency === "EUR" &&
     quoteFields.every((field) => {
       return isValidMoneyAmount(
@@ -244,6 +248,23 @@ function BookingConfirmation({
   const receipt =
     bookingResult.data?.data;
 
+  const retryPaymentStatus = bookingResult.retry;
+
+  // Stripe return parameters are hints; only the backend determines payment.
+  useEffect(() => {
+    if (bookingMode !== "api" || receipt?.bookingStatus !== "pending") return;
+    let attempts = 0;
+    const timer = window.setInterval(() => {
+      if (++attempts > 12) {
+        window.clearInterval(timer);
+        return;
+      }
+      retryPaymentStatus();
+    }, 5000);
+    return () => window.clearInterval(timer);
+  }, [receipt?.reference, receipt?.bookingStatus, retryPaymentStatus]);
+
+
 
   /*
    * FOCUS THE LOADED CONFIRMATION HEADING
@@ -362,6 +383,43 @@ function BookingConfirmation({
    * Cancellation does not erase the purchase-time receipt.
    * The QR is hidden for cancelled bookings/screenings.
    */
+  if (bookingMode === "api" &&
+      (receipt.bookingStatus !== "confirmed" || receipt.paymentStatus !== "paid")) {
+    const pending = receipt.bookingStatus === "pending";
+    let resumeUrl = null;
+    if (pending && typeof receipt.checkoutUrl === "string") {
+      try {
+        const url = new URL(receipt.checkoutUrl);
+        if (url.protocol === "https:" && url.hostname === "checkout.stripe.com" &&
+            !url.username && !url.password) resumeUrl = url.href;
+      } catch {
+        // No payment link is displayed for malformed backend URLs.
+      }
+    }
+    const returnedWithoutPayment = new URLSearchParams(location.search).get("checkout") === "cancelled";
+    return (
+      <section className="container section">
+        <h1 ref={headingRef} tabIndex={-1}>
+          {pending ? "Payment awaiting confirmation" : "Booking not confirmed"}
+        </h1>
+        <p>Booking reference: {receipt.reference}</p>
+        <p role="status">
+          {pending
+            ? returnedWithoutPayment
+              ? "You returned from checkout without completing payment. This booking is still pending."
+              : "The backend has not confirmed payment yet. We will check for updates briefly; you can also refresh the status."
+            : "This booking does not have a confirmed payment. No admission ticket is available."}
+        </p>
+        {resumeUrl && (
+          <a className="primary-button" href={resumeUrl}>Continue payment on Stripe</a>
+        )}
+        <button type="button" className="secondary-button" onClick={bookingResult.retry}
+          disabled={bookingResult.loading}>Refresh payment status</button>
+        <button type="button" className="secondary-button" onClick={onBackToMovies}>Back to movies</button>
+      </section>
+    );
+  }
+
   const screeningCancelled =
     receipt.screening.status === "cancelled";
 
@@ -374,7 +432,7 @@ function BookingConfirmation({
   const paymentDescription =
     receipt.paymentStatus === "simulated"
       ? "Payment simulated · No money charged"
-      : "Payment status unavailable";
+      : receipt.paymentStatus === "paid" ? "Payment confirmed" : "Payment status unavailable";
 
   const canViewHistory =
     !receipt.isGuest &&
@@ -514,14 +572,15 @@ function BookingConfirmation({
           </div>
         </dl>
 
-        <DemoTicketQR
-          reference={receipt.reference}
-          disabled={cancelled}
-        />
+        {bookingMode === "demo" ? (
+          <DemoTicketQR reference={receipt.reference} disabled={cancelled} />
+        ) : (
+          <p>Keep your booking reference. Secure admission QR tickets are not connected yet.</p>
+        )}
 
         {receipt.isGuest ? (
           <p className="confirmation-note">
-            You booked as a guest. Download your demo QR.
+            You booked as a guest. Keep your booking reference.
             Guest booking access requires this original
             session; no confirmation email is sent.
           </p>
@@ -541,7 +600,9 @@ function BookingConfirmation({
         )}
 
         <p className="confirmation-note">
-          This project uses simulated payments.
+          {bookingMode === "demo"
+            ? "This project uses simulated payments."
+            : "Payment confirmation is provided by the backend."}
           The demo QR is not validated for cinema admission.
         </p>
       </article>

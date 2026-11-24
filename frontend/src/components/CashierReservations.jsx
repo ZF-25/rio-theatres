@@ -61,7 +61,7 @@ function validReservation(reservation) {
     typeof reservation.customerName === "string" &&
     typeof reservation.note === "string" &&
     Array.isArray(reservation.seats) &&
-    reservation.seats.length > 0 &&
+    (reservation.status === "cancelled" || reservation.seats.length > 0) &&
     reservation.seats.every(
       (seat) =>
         typeof seat?.id === "string" &&
@@ -596,7 +596,9 @@ function ReservationList({
 
             {theaters.map((theater) => (
               <option key={theater.id} value={theater.id}>
-                {theater.name}
+                {theater.name.toLowerCase().includes(theater.city.toLowerCase())
+                  ? theater.name
+                  : `${theater.name} ${theater.city}`}
               </option>
             ))}
           </select>

@@ -30,6 +30,7 @@ import {
 } from "react";
 
 import {
+  Link,
   useLocation,
   useNavigate,
 } from "react-router-dom";
@@ -161,6 +162,12 @@ function BookingCard({ receipt }) {
   const paymentLabel =
     receipt.paymentStatus === "simulated"
       ? "Payment simulated"
+      : receipt.bookingStatus === "expired" ? "Booking expired"
+      : receipt.paymentStatus === "refunded" ? "Payment refunded"
+      : receipt.paymentStatus === "failed" ? "Payment failed"
+      : receipt.bookingStatus === "confirmed" && receipt.paymentStatus === "paid"
+        ? "Payment confirmed"
+      : receipt.bookingStatus === "pending" ? "Payment pending"
       : "Payment status unavailable";
 
   return (
@@ -200,6 +207,13 @@ function BookingCard({ receipt }) {
             : "This booking has been cancelled."}
           {" "}Your purchase record is retained.
         </p>
+      )}
+
+      {bookingMode === "api" && (
+        <Link className="secondary-button"
+          to={`/bookings/${encodeURIComponent(receipt.reference)}/confirmation`}>
+          View booking status
+        </Link>
       )}
 
       <details
@@ -268,7 +282,7 @@ function BookingCard({ receipt }) {
             </div>
           </dl>
 
-          {detailsOpen && (
+          {detailsOpen && bookingMode === "demo" && (
             <DemoTicketQR
               reference={receipt.reference}
               disabled={cancelled}
@@ -277,7 +291,9 @@ function BookingCard({ receipt }) {
 
           <p className="customer-ticket-note">
             {paymentLabel}.
-            {" "}This project uses simulated payments.
+            {" "}{bookingMode === "demo"
+              ? "This is a demonstration ticket with simulated payment."
+              : "Payment status is supplied by the backend. Demo QR codes are not admission tickets."}
           </p>
         </div>
       </details>

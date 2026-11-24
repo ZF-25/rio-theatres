@@ -185,7 +185,9 @@ function ScreeningPicker({ onSelect }) {
 
             {theaters.map((theater) => (
               <option key={theater.id} value={theater.id}>
-                {theater.name}
+                {theater.name.toLowerCase().includes(theater.city.toLowerCase())
+                  ? theater.name
+                  : `${theater.name} ${theater.city}`}
               </option>
             ))}
           </select>

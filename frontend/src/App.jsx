@@ -35,6 +35,8 @@ import AdminBookings from "./components/AdminBookings.jsx";
 import AdminSeats from "./components/AdminSeats.jsx";
 import CashierDashboard from "./pages/CashierDashboard.jsx";
 import { useAuth } from "./hooks/useAuth.js";
+import { staffMode } from "./services/staff.js";
+import { apiFeatures, ownerFeatureAvailable } from "./config/features.js";
 import "./App.css";
 
 const homeSections = new Set([
@@ -87,7 +89,9 @@ function StaffWorkspace({ role, session, onLogout, tab = "overview", onTabChange
       <p>Signed in as {getUserDisplayName(session.staff)}.</p>
       {role === "owner" ? (
         <>
-          {tab === "overview" ? (
+          {!ownerFeatureAvailable(tab, staffMode) ? (
+            <p role="status">This feature is awaiting backend integration. Your changes will not be saved to demo data.</p>
+          ) : tab === "overview" ? (
             <AdminOverview onTabChange={onTabChange} />
           ) : tab === "screenings" ? (
             <AdminScreenings />
@@ -112,7 +116,9 @@ function StaffWorkspace({ role, session, onLogout, tab = "overview", onTabChange
           )}
         </>
       ) : (
-        <CashierDashboard />
+        staffMode === "api" && !apiFeatures.staffReservations ? (
+          <p role="status">Staff reservations are awaiting backend integration.</p>
+        ) : <CashierDashboard />
       )}
       <button
         type="button"
@@ -460,12 +466,12 @@ function App() {
             : <SeatSelection onBack={returnToMovie} onHoldCreated={handleHoldCreated} />
         } />
         <Route path="/checkout/:holdId" element={
-          <Checkout contactDraft={checkoutDraft} onLogin={openCheckoutLogin}
+          !bookingEnabled ? <FeaturePlaceholder title="Checkout unavailable" onBack={backToMovies}>Customer checkout is not enabled in this integration batch.</FeaturePlaceholder> : <Checkout contactDraft={checkoutDraft} onLogin={openCheckoutLogin}
             onBack={returnToSeats} onBookingCreated={handleBookingCreated}
             onNavigationLockChange={reportCheckoutLock} />
         } />
         <Route path="/bookings/:reference/confirmation" element={
-          <BookingConfirmation onBackToMovies={backToMovies} onViewBookings={openBookingHistory} />
+          !bookingEnabled ? <FeaturePlaceholder title="Booking confirmation unavailable" onBack={backToMovies}>Customer booking integration is pending.</FeaturePlaceholder> : <BookingConfirmation onBackToMovies={backToMovies} onViewBookings={openBookingHistory} />
         } />
         <Route
           path="/login"
@@ -534,7 +540,8 @@ function App() {
         <Route
           path="/my-bookings"
           element={
-            isSessionLoading ? <RequestState loading loadingMessage="Checking your account…" />
+            !bookingEnabled ? <FeaturePlaceholder title="Booking history unavailable" onBack={backToMovies}>Customer booking integration is pending.</FeaturePlaceholder>
+              : isSessionLoading ? <RequestState loading loadingMessage="Checking your account…" />
               : !isCustomer ? <Navigate to="/login" state={{ returnTo: "/my-bookings" }} replace />
               : <BookingHistory onExploreMovies={backToMovies} />
           }
