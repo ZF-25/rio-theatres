@@ -295,6 +295,19 @@ module.exports.releaseHoldsForSession = releaseHoldsForSession;
 // - If login creates a NEW session row, pass its ID as newSessionId; if it
 //   upgrades the same row (new token, user_id set), leave it out.
 async function attachSessionHoldsToUser(client, { sessionId, userId, newSessionId = sessionId }) {
+  const { rows: stale } = await client.query(
+    `UPDATE checkout_holds SET status = 'expired', ended_at = NOW()
+      WHERE session_id = $1 AND status = 'active' AND expires_at <= NOW()
+      RETURNING checkout_hold_id`,
+    [sessionId]
+  );
+  if (stale.length) {
+    await client.query(
+      `UPDATE seat_holds SET hold_status = 'expired'
+        WHERE checkout_hold_id = ANY($1::int[]) AND hold_status = 'active'`,
+      [stale.map((r) => r.checkout_hold_id)]
+    );
+  }
   const { rows } = await client.query(
     `UPDATE checkout_holds
         SET user_id = $2, session_id = $3
