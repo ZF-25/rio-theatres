@@ -3,7 +3,10 @@ const bcrypt = require('bcrypt');
 const crypto = require('crypto');
 const pool = require('../config/db');
 const { mapDatabaseRoleToApiRole } = require('../utils/roleMapper');
-const { attachSessionHoldsToUser } = require('../services/holdService');
+const {
+  attachSessionHoldsToUser,
+  releaseHoldsForSession
+} = require('../services/holdService');
 const SESSION_DURATION = 24 * 60 * 60 * 1000;
 const SESSION_COOKIE_NAME = 'rio_session';
 
@@ -688,7 +691,10 @@ const logout = async (req, res) => {
     if (sessionResult.rows.length > 0) {
       const session = sessionResult.rows[0];
 
-      // Delete the current session
+      // Release active checkout holds before deleting the session.
+      await releaseHoldsForSession(client, session.session_id);
+
+      // Delete the current session.
       await client.query(
         `DELETE FROM sessions
          WHERE session_id = $1`,
