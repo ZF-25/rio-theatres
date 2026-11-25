@@ -83,8 +83,10 @@ import DemoTicketQR from "../components/DemoTicketQR.jsx";
 function validateReceipt(response, reference) {
   const receipt = response?.data;
 
-  const expiredAllocationReleased = bookingMode === "api" &&
-    receipt?.bookingStatus === "expired" && Array.isArray(receipt.seats) &&
+  const allocationReleased = bookingMode === "api" &&
+    (receipt?.bookingStatus === "expired" ||
+      (receipt?.bookingStatus === "cancelled" && receipt.paymentStatus === "refunded")) &&
+    Array.isArray(receipt.seats) &&
     receipt.seats.length === 0;
 
   const quoteFields = [
@@ -108,7 +110,7 @@ function validateReceipt(response, reference) {
       receipt.screening?.status,
     ) &&
     Array.isArray(receipt.seats) &&
-    (expiredAllocationReleased || receipt.seats.length > 0) &&
+    (allocationReleased || receipt.seats.length > 0) &&
     receipt.seats.every((seat) => {
       return (
         typeof seat.id === "string" &&
@@ -120,7 +122,7 @@ function validateReceipt(response, reference) {
     receipt.tickets.adult >= 0 &&
     Number.isInteger(receipt.tickets?.child) &&
     receipt.tickets.child >= 0 &&
-    (expiredAllocationReleased || receipt.tickets.adult +
+    (allocationReleased || receipt.tickets.adult +
       receipt.tickets.child ===
       receipt.seats.length) &&
     receipt.quote?.currency === "EUR" &&
@@ -386,6 +388,7 @@ function BookingConfirmation({
   if (bookingMode === "api" &&
       (receipt.bookingStatus !== "confirmed" || receipt.paymentStatus !== "paid")) {
     const pending = receipt.bookingStatus === "pending";
+    const refunded = receipt.paymentStatus === "refunded";
     let resumeUrl = null;
     if (pending && typeof receipt.checkoutUrl === "string") {
       try {
@@ -400,7 +403,7 @@ function BookingConfirmation({
     return (
       <section className="container section">
         <h1 ref={headingRef} tabIndex={-1}>
-          {pending ? "Payment awaiting confirmation" : "Booking not confirmed"}
+          {refunded ? "Payment refunded" : pending ? "Payment awaiting confirmation" : "Booking not confirmed"}
         </h1>
         <p>Booking reference: {receipt.reference}</p>
         <p role="status">
@@ -408,7 +411,9 @@ function BookingConfirmation({
             ? returnedWithoutPayment
               ? "You returned from checkout without completing payment. This booking is still pending."
               : "The backend has not confirmed payment yet. We will check for updates briefly; you can also refresh the status."
-            : "This booking does not have a confirmed payment. No admission ticket is available."}
+            : refunded
+              ? "Your payment was refunded. You can choose another screening or seats."
+              : "This booking does not have a confirmed payment. No admission ticket is available."}
         </p>
         {resumeUrl && (
           <a className="primary-button" href={resumeUrl}>Continue payment on Stripe</a>
