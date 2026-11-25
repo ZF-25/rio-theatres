@@ -260,10 +260,10 @@ async function getReservation(db, reservationId) {
 
   const seatResult = await db.query(
     `SELECT seat_id
-       FROM staff_reservation_seats
-      WHERE reservation_id = $1
-        AND is_active = TRUE
-      ORDER BY seat_id`,
+   FROM staff_reservation_seats
+  WHERE reservation_id = $1
+    AND is_current = TRUE
+  ORDER BY seat_id`,
     [reservationId]
   );
 
@@ -481,8 +481,20 @@ async function updateReservation(user, rawId, body) {
       fail(404, 'NOT_FOUND', 'Reservation not found.');
     }
 
+    if (reservation.status === 'cancelled') {
+      fail(
+        409,
+        'RESERVATION_CANCELLED',
+        'This reservation has been cancelled.'
+      );
+    }
+
     if (reservation.status !== 'active') {
-      fail(409, 'RESERVATION_INACTIVE', 'This reservation is no longer active.');
+      fail(
+        500,
+        'INTERNAL_SERVER_ERROR',
+        'An unexpected reservation status was encountered.'
+      );
     }
 
     if (reservation.version !== input.version) {
@@ -544,11 +556,12 @@ if (sameSeats && sameCustomerName && sameNote) {
 
     if (seatsToRemove.length) {
       await db.query(
-        `UPDATE staff_reservation_seats
-            SET is_active = FALSE
-          WHERE reservation_id = $1
-            AND seat_id = ANY($2::integer[])
-            AND is_active = TRUE`,
+       `UPDATE staff_reservation_seats
+     SET is_active = FALSE,
+         is_current = FALSE
+   WHERE reservation_id = $1
+     AND seat_id = ANY($2::integer[])
+     AND is_active = TRUE`,
         [reservationId, seatsToRemove]
       );
     }

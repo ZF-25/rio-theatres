@@ -78,7 +78,11 @@ app.use(
   '/api/v1/owner/cashiers',
   require('./src/routes/ownerCashiers')
 );
-
+// Owner API: screening management.
+app.use(
+  '/api/v1/owner/screenings',
+  require('./src/routes/ownerScreenings')
+);
 // Cashier API.
 app.use(
   '/api/v1/cashier',

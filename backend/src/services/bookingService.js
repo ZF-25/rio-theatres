@@ -109,19 +109,36 @@ const PAYMENT_STATUS = { successful: 'paid', pending: 'pending', failed: 'failed
 // shows the screening's current state.
 async function loadBookingResources(db, bookingIds) {
   if (bookingIds.length === 0) return [];
+
   const { rows } = await db.query(
-    `SELECT b.*, p.payment_status,
-            (b.booking_status = 'pending' AND b.expires_at > NOW()) AS checkout_open,
-            COALESCE(json_agg(json_build_object(
-                'id', bs.seat_id, 'label', bs.seat_label, 'rowLabel', bs.row_label)
-              ORDER BY bs.booking_seat_id) FILTER (WHERE bs.seat_id IS NOT NULL), '[]') AS seats
-       FROM bookings b
-       LEFT JOIN booking_seats bs ON bs.booking_id = b.booking_id
-       LEFT JOIN LATERAL (SELECT payment_status FROM payments
-                           WHERE booking_id = b.booking_id
-                           ORDER BY payment_id DESC LIMIT 1) p ON TRUE
-      WHERE b.booking_id = ANY($1::int[])
-      GROUP BY b.booking_id, p.payment_status`,
+    `SELECT
+        b.*,
+        p.payment_status,
+        s.status AS screening_status,
+        (b.booking_status = 'pending' AND b.expires_at > NOW()) AS checkout_open,
+        COALESCE(
+          json_agg(
+            json_build_object(
+              'id', bs.seat_id,
+              'label', bs.seat_label,
+              'rowLabel', bs.row_label
+            )
+            ORDER BY bs.booking_seat_id
+          ) FILTER (WHERE bs.seat_id IS NOT NULL),
+          '[]'
+        ) AS seats
+     FROM bookings b
+     LEFT JOIN screenings s ON s.screening_id = b.screening_id
+     LEFT JOIN booking_seats bs ON bs.booking_id = b.booking_id
+     LEFT JOIN LATERAL (
+       SELECT payment_status
+       FROM payments
+       WHERE booking_id = b.booking_id
+       ORDER BY payment_id DESC
+       LIMIT 1
+     ) p ON TRUE
+     WHERE b.booking_id = ANY($1::int[])
+     GROUP BY b.booking_id, p.payment_status, s.status`,
     [bookingIds]
   );
   const byId = new Map(rows.map((b) => [b.booking_id, b]));
@@ -136,8 +153,11 @@ async function loadBookingResources(db, bookingIds) {
       movie: { id: toApiId(b.movie_id), title: b.movie_title, posterUrl: b.movie_poster_url },
       cinema: { id: toApiId(b.theater_id), name: b.cinema_name, city: b.cinema_city },
       room: { id: toApiId(b.room_id), name: b.room_name },
-      // No cancellation column exists yet, so every screening is "scheduled".
-      screening: { id: toApiId(b.screening_id), startsAt: b.starts_at.toISOString(), status: 'scheduled' },
+screening: {
+  id: toApiId(b.screening_id),
+  startsAt: b.starts_at.toISOString(),
+  status: b.screening_status,
+},
       seats: b.seats.map((s) => ({ id: toApiId(s.id), label: s.label, rowLabel: s.rowLabel })),
       tickets: { adult: b.adult_count, child: b.child_count },
       quote: {
@@ -246,7 +266,7 @@ FOR UPDATE`,
             movie_id, movie_title, movie_poster_url, theater_id, cinema_name, cinema_city,
             room_id, room_name, starts_at,
             adult_count, child_count, adult_unit_cents, child_unit_cents, total_cents, payment_method)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, ($1 IS NULL), $8, $9,
+        VALUES ($1, $2, $3, $4, $5, $6, $7, ($1::integer IS NULL), $8, $9,
                  $10, $11, $12, $13, $14, $15, $16, $17, $18,
                  $19, $20, $21, $22, $23, $24)
          RETURNING booking_id`,
