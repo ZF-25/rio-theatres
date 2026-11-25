@@ -54,6 +54,10 @@ const ownerTabs = {
   cashiers: "Cashiers",
 };
 
+const defaultOwnerPath = ownerFeatureAvailable("overview", staffMode)
+  ? "/admin/overview"
+  : "/admin/cashiers";
+
 function FeaturePlaceholder({ title, children, onBack }) {
   return (
     <section className="container section">
@@ -360,7 +364,7 @@ function App() {
     }
     setMenuOpen(false);
     setLogoutError(null);
-    navigate(account.role === "owner" ? "/admin" : "/cashier", {
+    navigate(account.role === "owner" ? defaultOwnerPath : "/cashier", {
       replace: true,
     });
   }
@@ -383,7 +387,7 @@ function App() {
   const cashierOpen =
     location.pathname === "/cashier" ||
     location.pathname.startsWith("/cashier/");
-  const adminTab = location.pathname.split("/")[2] || "overview";
+  const adminTab = location.pathname.split("/")[2] || defaultOwnerPath.split("/")[2];
   const Layout = ownerOpen ? AdminLayout : CustomerLayout;
 
   function changeAdminTab(tab) {
@@ -394,7 +398,7 @@ function App() {
   function handleLogoClick(event) {
     if (ownerOpen || cashierOpen) {
       event?.preventDefault();
-      void navigateSafely(() => go(ownerOpen ? "/admin/overview" : "/cashier"));
+      void navigateSafely(() => go(ownerOpen ? defaultOwnerPath : "/cashier"));
     } else {
       navigateHome(event);
     }
@@ -509,6 +513,7 @@ function App() {
           element={
             <StaffWorkspace
               role="owner"
+              tab={adminTab}
               onTabChange={changeAdminTab}
               session={staffSession}
               onLogout={handleStaffLogout}
