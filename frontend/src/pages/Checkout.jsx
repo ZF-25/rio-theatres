@@ -175,10 +175,12 @@ function CheckoutContent({
   const matchingDraft = contactDraft?.holdId === holdId ? contactDraft : null;
 
   const [contact, setContact] = useState(() => {
-    const source =
-      saved?.purchase?.body.customer ??
-      matchingDraft?.customer ??
-      saved?.customer;
+    if (saved?.purchase) {
+      const { name, email } = saved.purchase.body.customer;
+      return { name, email };
+    }
+
+    const source = matchingDraft?.customer ?? saved?.customer;
 
     /*
      * Account names are separate fields.
@@ -195,9 +197,9 @@ function CheckoutContent({
       .join(" ");
 
     return {
-      name: source?.name ?? (accountFullName || customer?.name || ""),
+      name: source?.name?.trim() ? source.name : accountFullName || customer?.name || "",
 
-      email: source?.email ?? customer?.email ?? "",
+      email: source?.email?.trim() ? source.email : customer?.email || "",
     };
   });
 
