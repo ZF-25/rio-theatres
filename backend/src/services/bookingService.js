@@ -192,6 +192,8 @@ screening: {
 async function createBooking(owner, idempotencyKey, rawBody) {
   const input = validateCreateInput(rawBody);
   const stripe = input.paymentMethod === 'stripe' ? getStripe() : null;
+  // Set once Stripe has created a Checkout Session in this attempt.
+  let openedSessionId = null;
 
   return inTransaction((client) =>
     runOnce(client, { route: 'POST /bookings', ownerKey: owner.key, key: idempotencyKey, body: rawBody }, async () => {
@@ -265,17 +267,21 @@ FOR UPDATE`,
             session_id, is_guest, contact_name, contact_email,
             movie_id, movie_title, movie_poster_url, theater_id, cinema_name, cinema_city,
             room_id, room_name, starts_at,
-            adult_count, child_count, adult_unit_cents, child_unit_cents, total_cents, payment_method)
+            adult_count, child_count, adult_unit_cents, child_unit_cents, total_cents, payment_method,
+            guest_name, guest_email)
         VALUES ($1, $2, $3, $4, $5, $6, $7, ($1::integer IS NULL), $8, $9,
                  $10, $11, $12, $13, $14, $15, $16, $17, $18,
-                 $19, $20, $21, $22, $23, $24)
+                 $19, $20, $21, $22, $23, $24, $25, $26)
          RETURNING booking_id`,
         [owner.userId, s.screening_id, isStripe ? 'pending' : 'confirmed', centsToEuros(hold.total_cents),
           reference, hold.checkout_hold_id, owner.sessionId, input.name, input.email,
           s.movie_id, s.title, s.poster_url, s.theater_id, s.cinema_name, s.city,
           s.room_id, s.room_name, s.start_time,
           hold.adult_count, hold.child_count, hold.adult_unit_cents, hold.child_unit_cents, hold.total_cents,
-          input.paymentMethod]
+          input.paymentMethod,
+          // Guest bookings must store guest contact (chk_booking_customer_details).
+          owner.userId === null ? input.name : null,
+          owner.userId === null ? input.email : null]
       );
       const bookingId = booking.rows[0].booking_id;
 
@@ -332,7 +338,12 @@ FOR UPDATE`,
             expires_at: Math.floor(Date.now() / 1000) + CHECKOUT_SECONDS,
             success_url: `${frontend}/bookings/${reference}/confirmation?checkout=success`,
             cancel_url: `${frontend}/bookings/${reference}/confirmation?checkout=cancelled`,
+          }, {
+            // One key per booking row: the SDK's own network retries reuse it,
+            // so a lost response never creates a second session for this row.
+            idempotencyKey: `rio-booking-${bookingId}`,
           });
+          openedSessionId = session.id;
         } catch (err) {
           // Nothing is saved: the transaction rolls back and the hold stays active.
           console.error('Stripe Checkout Session failed:', err.message);
@@ -370,7 +381,24 @@ FOR UPDATE`,
       const [resource] = await loadBookingResources(client, [bookingId]);
       return { status: 201, body: { data: resource } };
     })
-  );
+  ).catch(async (err) => {
+    // Stripe succeeded but our transaction (or its COMMIT) failed: nothing
+    // was saved, so close that Checkout Session. A retry then starts one
+    // clean checkout instead of leaving a second, payable session behind.
+    if (openedSessionId) await expireOrphanSession(stripe, openedSessionId);
+    throw err;
+  });
+}
+
+async function expireOrphanSession(stripe, sessionId) {
+  try {
+    await stripe.checkout.sessions.expire(sessionId);
+    console.error(`Booking was not saved; expired Stripe session ${sessionId}.`);
+  } catch (e) {
+    // Best effort: nobody received this session's payment link, and an
+    // unpaid session expires by itself after 30 minutes anyway.
+    console.error(`Could not expire orphan Stripe session ${sessionId}:`, e.message);
+  }
 }
 
 // ---------- Stripe webhook ----------
@@ -389,15 +417,33 @@ async function handleStripeEvent(event) {
     const session = event.data && event.data.object;
     if (!session || !session.id) return 'ignored';
 
+    let result = 'ignored';
     if (event.type === 'checkout.session.completed' || event.type === 'checkout.session.async_payment_succeeded') {
       if (session.payment_status !== 'paid') return 'not paid yet';
-      return confirmPaidSession(client, session);
+      result = await confirmPaidSession(client, session);
+    } else if (event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {
+      result = await expireSession(client, session);
     }
-    if (event.type === 'checkout.session.expired' || event.type === 'checkout.session.async_payment_failed') {
-      return expireSession(client, session);
+
+    if (result === 'unknown session' && mayStillBeSaving(session)) {
+      // Our session, but its booking is not in the database (yet). Throwing
+      // rolls back the stripe_events row and answers 503, so Stripe sends
+      // the event again later instead of it being lost.
+      throw httpError(503, 'BOOKING_NOT_READY', 'The booking for this checkout is not saved yet. Retry later.');
     }
-    return 'ignored';
+    return result;
   });
+}
+
+// A session we created (it carries our booking reference) that is less than
+// an hour old. Older or foreign sessions (e.g. a teammate's local test in
+// the shared Stripe sandbox) are acknowledged so Stripe stops retrying.
+const RETRY_UNKNOWN_SECONDS = 60 * 60;
+function mayStillBeSaving(session) {
+  const reference = session.metadata && session.metadata.reference;
+  if (typeof reference !== 'string' || !reference.startsWith('RIO-')) return false;
+  if (typeof session.created !== 'number') return false;
+  return Date.now() / 1000 - session.created < RETRY_UNKNOWN_SECONDS;
 }
 
 // Locks screening then booking (same order as every inventory change).
@@ -407,12 +453,41 @@ async function lockBookingBySession(client, sessionId) {
     [sessionId]
   );
   if (found.rows.length === 0) return null;
-  await client.query('SELECT 1 FROM screenings WHERE screening_id = $1 FOR UPDATE', [found.rows[0].screening_id]);
+  const screening = await client.query(
+    'SELECT status FROM screenings WHERE screening_id = $1 FOR UPDATE',
+    [found.rows[0].screening_id]
+  );
   const { rows } = await client.query(
-    'SELECT booking_id, booking_status FROM bookings WHERE booking_id = $1 FOR UPDATE',
+    `SELECT booking_id, booking_status,
+            expires_at IS NOT NULL AND expires_at + INTERVAL '10 minutes' <= NOW() AS past_grace
+       FROM bookings WHERE booking_id = $1 FOR UPDATE`,
     [found.rows[0].booking_id]
   );
-  return rows[0];
+  return { ...rows[0], screeningStatus: screening.rows[0].status };
+}
+
+// After expiry + grace, the seat map shows a pending booking's seats as free,
+// so another customer may hold them or staff may reserve them. Returns true
+// if any of this booking's seats is now allocated to someone else.
+// (Another BOOKING cannot have them: uq_booking_seats_screening_seat.)
+async function seatsTakenElsewhere(client, bookingId) {
+  const { rows } = await client.query(
+    `SELECT 1
+       FROM booking_seats bs
+      WHERE bs.booking_id = $1
+        AND (
+          EXISTS (SELECT 1 FROM seat_holds h
+                   WHERE h.screening_id = bs.screening_id AND h.seat_id = bs.seat_id
+                     AND h.hold_status = 'active' AND h.expires_at > NOW())
+          OR EXISTS (SELECT 1 FROM staff_reservation_seats srs
+                       JOIN staff_reservations sr ON sr.reservation_id = srs.reservation_id
+                      WHERE srs.screening_id = bs.screening_id AND srs.seat_id = bs.seat_id
+                        AND srs.is_active = TRUE AND sr.status = 'active')
+        )
+      LIMIT 1`,
+    [bookingId]
+  );
+  return rows.length > 0;
 }
 
 async function confirmPaidSession(client, session) {
@@ -421,35 +496,53 @@ async function confirmPaidSession(client, session) {
   const paymentIntent = typeof session.payment_intent === 'string' ? session.payment_intent : session.payment_intent?.id;
 
   if (booking.booking_status === 'pending') {
-    await client.query(
-      `UPDATE bookings SET booking_status = 'confirmed', stripe_payment_intent_id = $2 WHERE booking_id = $1`,
-      [booking.booking_id, paymentIntent]
-    );
-    await client.query(
-      `UPDATE payments SET payment_status = 'successful', paid_at = NOW()
-        WHERE booking_id = $1 AND payment_method = 'stripe'`,
-      [booking.booking_id]
-    );
-    console.log(`Booking ${booking.booking_id} is paid.`);
-    return 'confirmed';
+    // A late webhook must not confirm seats that now belong to someone else,
+    // or a booking for a screening that was cancelled meanwhile.
+    const cannotKeep = booking.screeningStatus === 'cancelled'
+      || (booking.past_grace && await seatsTakenElsewhere(client, booking.booking_id));
+    if (!cannotKeep) {
+      await client.query(
+        `UPDATE bookings SET booking_status = 'confirmed', stripe_payment_intent_id = $2 WHERE booking_id = $1`,
+        [booking.booking_id, paymentIntent]
+      );
+      await client.query(
+        `UPDATE payments SET payment_status = 'successful', paid_at = NOW()
+          WHERE booking_id = $1 AND payment_method = 'stripe'`,
+        [booking.booking_id]
+      );
+      console.log(`Booking ${booking.booking_id} is paid.`);
+      return 'confirmed';
+    }
+    await client.query('DELETE FROM booking_seats WHERE booking_id = $1', [booking.booking_id]);
+    return refundLatePayment(client, booking.booking_id, session, paymentIntent);
   }
 
   if (booking.booking_status === 'expired' && paymentIntent) {
     // Paid after the checkout had already expired and the seats were
     // released: never sell a seat twice; give the money back instead.
-    await getStripe().refunds.create({ payment_intent: paymentIntent }, { idempotencyKey: `refund-${session.id}` });
-    await client.query(
-      `UPDATE bookings SET booking_status = 'cancelled', stripe_payment_intent_id = $2 WHERE booking_id = $1`,
-      [booking.booking_id, paymentIntent]
-    );
-    await client.query(
-      `UPDATE payments SET payment_status = 'refunded' WHERE booking_id = $1 AND payment_method = 'stripe'`,
-      [booking.booking_id]
-    );
-    console.log(`Booking ${booking.booking_id} was paid after expiry and has been refunded.`);
-    return 'refunded';
+    return refundLatePayment(client, booking.booking_id, session, paymentIntent);
   }
   return 'already handled';
+}
+
+async function refundLatePayment(client, bookingId, session, paymentIntent) {
+  if (!paymentIntent) {
+    // Nothing to refund automatically: keep the booking unsold and visible.
+    await client.query(`UPDATE bookings SET booking_status = 'expired' WHERE booking_id = $1`, [bookingId]);
+    console.error(`Booking ${bookingId}: paid session ${session.id} has no payment intent; refund it in the Stripe Dashboard.`);
+    return 'expired';
+  }
+  await getStripe().refunds.create({ payment_intent: paymentIntent }, { idempotencyKey: `refund-${session.id}` });
+  await client.query(
+    `UPDATE bookings SET booking_status = 'cancelled', stripe_payment_intent_id = $2 WHERE booking_id = $1`,
+    [bookingId, paymentIntent]
+  );
+  await client.query(
+    `UPDATE payments SET payment_status = 'refunded' WHERE booking_id = $1 AND payment_method = 'stripe'`,
+    [bookingId]
+  );
+  console.log(`Booking ${bookingId} was paid too late to keep its seats and has been refunded.`);
+  return 'refunded';
 }
 
 async function expireSession(client, session) {
